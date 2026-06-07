@@ -1,7 +1,5 @@
-import * as admin from "firebase-admin";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-
-const db = admin.firestore();
+import { db } from "./firebaseAdmin";
 
 type GenerateItineraryInput = {
   userId: string;

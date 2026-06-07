@@ -1,10 +1,7 @@
-import * as admin from "firebase-admin";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import textToSpeech from "@google-cloud/text-to-speech";
 import { Translate } from "@google-cloud/translate/build/src/v2";
-
-const db = admin.firestore();
-const bucket = admin.storage().bucket();
+import { bucket, db } from "./firebaseAdmin";
 const ttsClient = new textToSpeech.TextToSpeechClient();
 const translateClient = new Translate();
 

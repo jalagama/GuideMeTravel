@@ -1,9 +1,7 @@
-import * as admin from "firebase-admin";
+import "./firebaseAdmin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { generateItineraryForDestination } from "./generateItinerary";
 import { generateGuidePackForTrip } from "./generateGuidePack";
-
-admin.initializeApp();
 
 export const generateItinerary = onCall(
   { region: "asia-south1", timeoutSeconds: 120 },

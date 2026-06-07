@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GuideMe</string>
+    <string name="tagline">Your AI travel companion</string>
+    <string name="search_hint">Where are you going?</string>
+    <string name="from_hint">Starting from</string>
+    <string name="create_plan">Create travel plan</string>
+    <string name="download_offline_pack">Download offline pack</string>
+    <string name="start_trip">Start trip</string>
+    <string name="end_trip">Complete trip</string>
+    <string name="delete_offline_data">Delete offline data</string>
+    <string name="guide_playing">Guide playing</string>
+    <string name="trip_in_progress">Trip in progress</string>
+    <string name="notification_channel_trip">Trip guide</string>
+    <string name="notification_trip_active">GuideMe is guiding your trip</string>
+</resources>

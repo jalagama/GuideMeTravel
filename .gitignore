@@ -1,0 +1,26 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+*.apk
+*.ap_
+*.aab
+
+# Android Studio
+*.hprof
+
+# Firebase
+backend/functions/node_modules/
+backend/functions/lib/
+.firebase/
+firebase-debug.log
+
+# Secrets
+**/google-services.json.bak
+.env
+.env.*

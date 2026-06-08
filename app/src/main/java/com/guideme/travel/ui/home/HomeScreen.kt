@@ -13,14 +13,24 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.guideme.travel.domain.model.LanguageOptions
 import com.guideme.travel.ui.components.GuideMeCard
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     uiState: HomeUiState,
@@ -30,6 +40,10 @@ fun HomeScreen(
     onCreatePlan: () -> Unit,
     onOpenTrip: (String) -> Unit
 ) {
+    var languageExpanded by remember { mutableStateOf(false) }
+    val selectedLanguage = LanguageOptions.supported.firstOrNull { it.code == uiState.languageCode }
+        ?: LanguageOptions.supported.first()
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -67,13 +81,35 @@ fun HomeScreen(
                     label = { Text("Destination") },
                     singleLine = true
                 )
-                OutlinedTextField(
-                    value = uiState.languageCode,
-                    onValueChange = onLanguageChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Guide language (en, hi, es)") },
-                    singleLine = true
-                )
+                ExposedDropdownMenuBox(
+                    expanded = languageExpanded,
+                    onExpandedChange = { languageExpanded = !languageExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = selectedLanguage.displayName,
+                        onValueChange = {},
+                        readOnly = true,
+                        modifier = Modifier
+                            .menuAnchor()
+                            .fillMaxWidth(),
+                        label = { Text("Guide language") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = languageExpanded) }
+                    )
+                    ExposedDropdownMenu(
+                        expanded = languageExpanded,
+                        onDismissRequest = { languageExpanded = false }
+                    ) {
+                        LanguageOptions.supported.forEach { language ->
+                            DropdownMenuItem(
+                                text = { Text(language.displayName) },
+                                onClick = {
+                                    onLanguageChange(language.code)
+                                    languageExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
                 if (uiState.errorMessage != null) {
                     Text(
                         text = uiState.errorMessage,

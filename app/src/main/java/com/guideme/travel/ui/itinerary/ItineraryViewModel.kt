@@ -5,7 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import com.guideme.travel.domain.model.TripPlan
-import com.guideme.travel.domain.repository.TripRepository
+import com.guideme.travel.domain.usecase.ObserveTripUseCase
+import com.guideme.travel.domain.usecase.StartTripUseCase
 import com.guideme.travel.ui.navigation.ItineraryRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,12 +24,13 @@ data class ItineraryUiState(
 @HiltViewModel
 class ItineraryViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val tripRepository: TripRepository
+    private val observeTripUseCase: ObserveTripUseCase,
+    private val startTripUseCase: StartTripUseCase
 ) : ViewModel() {
 
     private val tripId: String = savedStateHandle.toRoute<ItineraryRoute>().tripId
 
-    val uiState: StateFlow<ItineraryUiState> = tripRepository.observeTrip(tripId)
+    val uiState: StateFlow<ItineraryUiState> = observeTripUseCase(tripId)
         .map { trip ->
             ItineraryUiState(trip = trip, isLoading = trip == null)
         }
@@ -40,7 +42,7 @@ class ItineraryViewModel @Inject constructor(
 
     fun startTrip(tripId: String) {
         viewModelScope.launch {
-            tripRepository.startTrip(tripId)
+            startTripUseCase(tripId)
         }
     }
 }

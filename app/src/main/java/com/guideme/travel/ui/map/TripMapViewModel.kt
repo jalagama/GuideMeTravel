@@ -1,18 +1,25 @@
 package com.guideme.travel.ui.map
 
+import android.content.Context
 import android.content.Intent
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
+import com.guideme.travel.data.offline.MapLibreOfflineMapManager
+import com.guideme.travel.data.offline.OfflineMapMetadata
+import com.guideme.travel.domain.model.AttractionStatus
 import com.guideme.travel.domain.model.TripPlan
-import com.guideme.travel.domain.repository.TripRepository
+import com.guideme.travel.domain.model.UserLocation
+import com.guideme.travel.domain.usecase.CompleteTripUseCase
+import com.guideme.travel.domain.usecase.IsTripCompleteUseCase
+import com.guideme.travel.domain.usecase.ObserveLocationUseCase
+import com.guideme.travel.domain.usecase.ObserveTripUseCase
 import com.guideme.travel.service.TripGuideForegroundService
 import com.guideme.travel.ui.navigation.TripMapRoute
 import com.guideme.travel.util.LocationPermissionHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -23,30 +30,69 @@ import javax.inject.Inject
 
 data class TripMapUiState(
     val trip: TripPlan? = null,
-    val guideServiceRunning: Boolean = false
+    val guideServiceRunning: Boolean = false,
+    val userLocation: UserLocation? = null,
+    val followUser: Boolean = true,
+    val mapStyleUrl: String? = null,
+    val mapMetadata: OfflineMapMetadata? = null,
+    val nextAttractionId: String? = null,
+    val allSpotsVisited: Boolean = false
 )
 
 @HiltViewModel
 class TripMapViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     savedStateHandle: SavedStateHandle,
-    private val tripRepository: TripRepository
+    private val observeTripUseCase: ObserveTripUseCase,
+    private val observeLocationUseCase: ObserveLocationUseCase,
+    private val completeTripUseCase: CompleteTripUseCase,
+    private val isTripCompleteUseCase: IsTripCompleteUseCase,
+    private val mapLibreOfflineMapManager: MapLibreOfflineMapManager
 ) : ViewModel() {
 
     private val tripId: String = savedStateHandle.toRoute<TripMapRoute>().tripId
     private val guideServiceStarted = MutableStateFlow(false)
+    private val followUser = MutableStateFlow(true)
 
     val uiState: StateFlow<TripMapUiState> = combine(
-        tripRepository.observeTrip(tripId),
-        guideServiceStarted
-    ) { trip, serviceRunning ->
-        TripMapUiState(trip = trip, guideServiceRunning = serviceRunning)
-    }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = TripMapUiState()
+        observeTripUseCase(tripId),
+        guideServiceStarted,
+        observeLocationUseCase(),
+        followUser
+    ) { trip, serviceRunning, location, follow ->
+        val nextAttraction = trip?.attractions
+            ?.sortedBy { it.orderIndex }
+            ?.firstOrNull { it.status != AttractionStatus.VISITED }
+        TripMapUiState(
+            trip = trip,
+            guideServiceRunning = serviceRunning,
+            userLocation = location,
+            followUser = follow,
+            mapStyleUrl = mapLibreOfflineMapManager.styleUrl(),
+            mapMetadata = mapLibreOfflineMapManager.loadRegionMetadata(tripId),
+            nextAttractionId = nextAttraction?.id,
+            allSpotsVisited = trip?.attractions?.isNotEmpty() == true &&
+                trip.attractions.all { it.status == AttractionStatus.VISITED }
         )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = TripMapUiState()
+    )
+
+    init {
+        viewModelScope.launch {
+            observeTripUseCase(tripId).collect {
+                if (isTripCompleteUseCase(tripId)) {
+                    // UI can react via allSpotsVisited
+                }
+            }
+        }
+    }
+
+    fun toggleFollowUser() {
+        followUser.value = !followUser.value
+    }
 
     fun startGuideService(trip: TripPlan) {
         if (guideServiceStarted.value) return
@@ -75,11 +121,12 @@ class TripMapViewModel @Inject constructor(
         context.startForegroundService(intent)
     }
 
-    fun completeTrip() {
+    fun completeTrip(onComplete: () -> Unit) {
         viewModelScope.launch {
-            tripRepository.completeTrip(tripId)
+            completeTripUseCase(tripId)
             context.stopService(Intent(context, TripGuideForegroundService::class.java))
             guideServiceStarted.value = false
+            onComplete()
         }
     }
 }

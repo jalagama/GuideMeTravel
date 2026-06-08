@@ -19,5 +19,9 @@ service cloud.firestore {
         allow write: if false;
       }
     }
+
+    match /rateLimits/{limitId} {
+      allow read, write: if false;
+    }
   }
 }

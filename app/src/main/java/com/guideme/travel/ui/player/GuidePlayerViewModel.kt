@@ -5,8 +5,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import com.guideme.travel.domain.model.GuidePlaybackState
-import com.guideme.travel.domain.repository.GuideRepository
-import com.guideme.travel.domain.repository.TripRepository
+import com.guideme.travel.domain.usecase.GetGuideContentUseCase
+import com.guideme.travel.domain.usecase.ObservePlaybackStateUseCase
+import com.guideme.travel.domain.usecase.ObserveTripUseCase
+import com.guideme.travel.domain.usecase.PlayGuideUseCase
+import com.guideme.travel.domain.usecase.StopGuideUseCase
 import com.guideme.travel.ui.navigation.GuidePlayerRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
@@ -26,15 +29,18 @@ data class GuidePlayerUiState(
 @HiltViewModel
 class GuidePlayerViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val tripRepository: TripRepository,
-    private val guideRepository: GuideRepository
+    private val observeTripUseCase: ObserveTripUseCase,
+    private val observePlaybackStateUseCase: ObservePlaybackStateUseCase,
+    private val playGuideUseCase: PlayGuideUseCase,
+    private val stopGuideUseCase: StopGuideUseCase,
+    private val getGuideContentUseCase: GetGuideContentUseCase
 ) : ViewModel() {
 
     private val route = savedStateHandle.toRoute<GuidePlayerRoute>()
 
     val uiState: StateFlow<GuidePlayerUiState> = combine(
-        tripRepository.observeTrip(route.tripId),
-        guideRepository.observePlaybackState()
+        observeTripUseCase(route.tripId),
+        observePlaybackStateUseCase()
     ) { trip, playback ->
         val attraction = trip?.attractions?.firstOrNull { it.id == route.attractionId }
         GuidePlayerUiState(
@@ -50,15 +56,15 @@ class GuidePlayerViewModel @Inject constructor(
 
     fun play(tripId: String, attractionId: String) {
         viewModelScope.launch {
-            val trip = tripRepository.observeTrip(tripId).first()
-            val attraction = trip?.attractions?.firstOrNull { it.id == attractionId } ?: return@launch
-            guideRepository.playGuideForAttraction(attraction)
+            val trip = observeTripUseCase(tripId).first() ?: return@launch
+            val attraction = getGuideContentUseCase(tripId, attractionId) ?: return@launch
+            playGuideUseCase(attraction, trip.languageCode)
         }
     }
 
     fun stop() {
         viewModelScope.launch {
-            guideRepository.stopGuide()
+            stopGuideUseCase()
         }
     }
 }

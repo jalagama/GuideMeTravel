@@ -17,6 +17,10 @@
 # Firebase
 backend/functions/node_modules/
 backend/functions/lib/
+backend/functions/.npm-cache/
+backend/cloud-run/node_modules/
+backend/cloud-run/lib/
+backend/cloud-run/.npm-cache/
 .firebase/
 firebase-debug.log
 

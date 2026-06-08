@@ -1,5 +1,6 @@
 package com.guideme.travel.ui.theme
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -30,6 +31,19 @@ private val LightColors = lightColorScheme(
     onSurface = Ink,
     surfaceVariant = Color(0xFFEFEFEF),
     onSurfaceVariant = Slate
+)
+
+private val DarkColors = darkColorScheme(
+    primary = Coral,
+    onPrimary = Color.White,
+    secondary = Teal,
+    onSecondary = Color.White,
+    background = Color(0xFF121212),
+    onBackground = Color(0xFFF5F5F5),
+    surface = Color(0xFF1E1E1E),
+    onSurface = Color(0xFFF5F5F5),
+    surfaceVariant = Color(0xFF2A2A2A),
+    onSurfaceVariant = Color(0xFFB0B0B0)
 )
 
 private val AppTypography = Typography(
@@ -66,8 +80,9 @@ private val AppShapes = Shapes(
 
 @Composable
 fun GuideMeTheme(content: @Composable () -> Unit) {
+    val darkTheme = isSystemInDarkTheme()
     MaterialTheme(
-        colorScheme = LightColors,
+        colorScheme = if (darkTheme) DarkColors else LightColors,
         typography = AppTypography,
         shapes = AppShapes,
         content = content

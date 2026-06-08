@@ -2,7 +2,7 @@ package com.guideme.travel.ui.consent
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.guideme.travel.data.preferences.UserPreferencesRepository
+import com.guideme.travel.domain.usecase.SaveConsentUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,7 +19,7 @@ data class ConsentUiState(
 
 @HiltViewModel
 class ConsentViewModel @Inject constructor(
-    private val userPreferencesRepository: UserPreferencesRepository
+    private val saveConsentUseCase: SaveConsentUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ConsentUiState())
@@ -45,9 +45,10 @@ class ConsentViewModel @Inject constructor(
 
     fun saveConsent(onSuccess: () -> Unit) {
         viewModelScope.launch {
-            userPreferencesRepository.setPrivacyConsent(_uiState.value.privacyAccepted)
-            userPreferencesRepository.setLocationConsent(_uiState.value.locationAccepted)
-            userPreferencesRepository.setOnboardingComplete(true)
+            saveConsentUseCase(
+                privacyGranted = _uiState.value.privacyAccepted,
+                locationGranted = _uiState.value.locationAccepted
+            )
             onSuccess()
         }
     }

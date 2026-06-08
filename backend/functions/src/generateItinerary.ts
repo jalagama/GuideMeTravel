@@ -1,5 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { HttpsError } from "firebase-functions/v2/https";
 import { db } from "./firebaseAdmin";
+import { fetchWikipediaSummary } from "./wikipedia";
+import { fetchWithTimeout, logEvent, validateLanguageCode } from "./utils";
 
 type GenerateItineraryInput = {
   userId: string;
@@ -20,76 +23,39 @@ type AttractionDoc = {
   transcript?: string;
 };
 
-const HAMPI_ATTRACTIONS: AttractionDoc[] = [
-  {
-    id: "virupaksha",
-    name: "Virupaksha Temple",
-    description: "A 7th-century temple dedicated to Lord Shiva and the spiritual heart of Hampi.",
-    latitude: 15.335,
-    longitude: 76.46,
-    imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8e/Virupaksha_Temple_Hampi.jpg/640px-Virupaksha_Temple_Hampi.jpg",
-    orderIndex: 0,
-    estimatedMinutes: 60,
-  },
-  {
-    id: "vittala",
-    name: "Vittala Temple",
-    description: "Famous for its iconic stone chariot and musical pillars.",
-    latitude: 15.342,
-    longitude: 76.478,
-    imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4a/Stone_Chariot_Hampi.jpg/640px-Stone_Chariot_Hampi.jpg",
-    orderIndex: 1,
-    estimatedMinutes: 75,
-  },
-  {
-    id: "lotus",
-    name: "Lotus Mahal",
-    description: "An elegant Indo-Islamic pavilion in the Zenana enclosure.",
-    latitude: 15.3185,
-    longitude: 76.4715,
-    imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1f/Lotus_Mahal_Hampi.jpg/640px-Lotus_Mahal_Hampi.jpg",
-    orderIndex: 2,
-    estimatedMinutes: 40,
-  },
-  {
-    id: "matanga",
-    name: "Matanga Hill",
-    description: "Panoramic sunrise and sunset views over the Hampi boulder landscape.",
-    latitude: 15.3375,
-    longitude: 76.4675,
-    imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5e/Hampi_sunrise.jpg/640px-Hampi_sunrise.jpg",
-    orderIndex: 3,
-    estimatedMinutes: 50,
-  },
-  {
-    id: "hemakuta",
-    name: "Hemakuta Hill Temples",
-    description: "Cluster of early temples with sweeping views near Virupaksha.",
-    latitude: 15.3338,
-    longitude: 76.4588,
-    imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Hemakuta_Hill_Hampi.jpg/640px-Hemakuta_Hill_Hampi.jpg",
-    orderIndex: 4,
-    estimatedMinutes: 45,
-  },
-];
+const MAX_ATTRACTIONS = 5;
+const PLACES_RADIUS_METERS = 50000;
+const ESTIMATED_AUDIO_MB_PER_ATTRACTION = 2.5;
+const ESTIMATED_MAP_TILES_MB = 45;
 
 export async function generateItineraryForDestination(input: GenerateItineraryInput) {
+  const languageCode = validateLanguageCode(input.languageCode);
   const tripRef = db.collection("trips").doc();
-  const attractions = await curateAttractions(input.destination);
+  const attractions = await curateAttractions(input.destination, languageCode);
+  const offlinePackSizeMb = estimatePackSizeMb(attractions.length);
 
   const tripDoc = {
     userId: input.userId,
     origin: input.origin,
     destination: input.destination,
-    languageCode: input.languageCode,
+    languageCode,
     status: "READY",
     attractions,
     createdAtMillis: Date.now(),
-    offlinePackSizeMb: 120,
+    offlinePackSizeMb,
     offlinePackDownloaded: false,
   };
 
   await tripRef.set(tripDoc);
+  await cacheGlobalAttractions(attractions);
+
+  logEvent("itinerary_generated", {
+    tripId: tripRef.id,
+    userId: input.userId,
+    destination: input.destination,
+    attractionCount: attractions.length,
+    offlinePackSizeMb,
+  });
 
   return {
     tripId: tripRef.id,
@@ -97,55 +63,168 @@ export async function generateItineraryForDestination(input: GenerateItineraryIn
   };
 }
 
-async function curateAttractions(destination: string): Promise<AttractionDoc[]> {
-  const normalized = destination.toLowerCase();
-  if (normalized.includes("hampi")) {
-    return enrichWithWikipedia(HAMPI_ATTRACTIONS);
-  }
+function estimatePackSizeMb(attractionCount: number): number {
+  const audioMb = attractionCount * ESTIMATED_AUDIO_MB_PER_ATTRACTION;
+  return Math.ceil(audioMb + ESTIMATED_MAP_TILES_MB);
+}
 
+async function curateAttractions(
+  destination: string,
+  languageCode: string
+): Promise<AttractionDoc[]> {
   const placesAttractions = await fetchPlacesAttractions(destination);
   if (placesAttractions.length > 0) {
-    return enrichWithWikipedia(placesAttractions);
+    return enrichWithWikipedia(
+      await optimizeRoute(placesAttractions),
+      languageCode
+    );
   }
 
+  const geminiAttractions = await fetchGeminiAttractions(destination);
+  if (geminiAttractions.length > 0) {
+    return enrichWithWikipedia(
+      await optimizeRoute(geminiAttractions),
+      languageCode
+    );
+  }
+
+  throw new HttpsError(
+    "not-found",
+    `No tourist attractions found near "${destination}". Try a more specific destination name.`
+  );
+}
+
+async function fetchGeminiAttractions(destination: string): Promise<AttractionDoc[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return enrichWithWikipedia(HAMPI_ATTRACTIONS);
+    throw new HttpsError(
+      "failed-precondition",
+      "Gemini API key is not configured. Cannot curate attractions."
+    );
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
   const prompt = `
 You are a travel planner. Return JSON array only for major tourist attractions near ${destination}.
-Each item must include: id, name, description, latitude, longitude, orderIndex, estimatedMinutes.
-Use only real places. Limit to 5 attractions.
+Each item must include: id (slug), name, description, latitude, longitude, orderIndex, estimatedMinutes.
+Use only real places. Limit to ${MAX_ATTRACTIONS} attractions.
 `;
 
-  const result = await model.generateContent(prompt);
-  const text = extractJsonArray(result.response.text());
   try {
+    const result = await model.generateContent(prompt);
+    const text = extractJsonArray(result.response.text());
     const parsed = JSON.parse(text) as AttractionDoc[];
-    return enrichWithWikipedia(parsed.slice(0, 5));
-  } catch {
-    return enrichWithWikipedia(HAMPI_ATTRACTIONS);
+    return parsed.slice(0, MAX_ATTRACTIONS).map((item, index) => ({
+      ...item,
+      id: item.id || slugify(item.name),
+      orderIndex: index,
+      estimatedMinutes: item.estimatedMinutes ?? 45,
+    }));
+  } catch (error) {
+    logEvent("gemini_curation_failed", {
+      destination,
+      error: error instanceof Error ? error.message : "unknown",
+    });
+    return [];
   }
+}
+
+async function optimizeRoute(attractions: AttractionDoc[]): Promise<AttractionDoc[]> {
+  const mapsKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!mapsKey || attractions.length < 2) {
+    return attractions.map((item, index) => ({ ...item, orderIndex: index }));
+  }
+
+  const origin = `${attractions[0].latitude},${attractions[0].longitude}`;
+  const destination = `${attractions[attractions.length - 1].latitude},${attractions[attractions.length - 1].longitude}`;
+  const waypoints = attractions
+    .slice(1, -1)
+    .map((item) => `${item.latitude},${item.longitude}`)
+    .join("|");
+
+  const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&waypoints=optimize:true|${encodeURIComponent(waypoints)}&key=${mapsKey}`;
+  const response = await fetchWithTimeout(url);
+  const data = await response.json();
+
+  if (data.status !== "OK") {
+    logEvent("directions_api_warning", {
+      status: data.status,
+      errorMessage: data.error_message,
+    });
+    return attractions.map((item, index) => ({ ...item, orderIndex: index }));
+  }
+
+  const order = data.routes?.[0]?.waypoint_order as number[] | undefined;
+  if (!order || order.length === 0) {
+    return attractions.map((item, index) => ({ ...item, orderIndex: index }));
+  }
+
+  const middle = attractions.slice(1, -1);
+  const reordered = [
+    attractions[0],
+    ...order.map((index) => middle[index]),
+    attractions[attractions.length - 1],
+  ];
+  return reordered.map((item, index) => ({ ...item, orderIndex: index }));
+}
+
+async function cacheGlobalAttractions(attractions: AttractionDoc[]): Promise<void> {
+  await Promise.all(
+    attractions.map((attraction) =>
+      db.collection("attractions").doc(attraction.id).set(
+        {
+          name: attraction.name,
+          description: attraction.description,
+          latitude: attraction.latitude,
+          longitude: attraction.longitude,
+          imageUrl: attraction.imageUrl ?? null,
+          estimatedMinutes: attraction.estimatedMinutes,
+          updatedAtMillis: Date.now(),
+        },
+        { merge: true }
+      )
+    )
+  );
 }
 
 async function fetchPlacesAttractions(destination: string): Promise<AttractionDoc[]> {
   const mapsKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!mapsKey) return [];
+  if (!mapsKey) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Google Maps API key is not configured."
+    );
+  }
 
   const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(destination)}&key=${mapsKey}`;
-  const geocodeRes = await fetch(geocodeUrl);
+  const geocodeRes = await fetchWithTimeout(geocodeUrl);
   const geocodeData = await geocodeRes.json();
-  const location = geocodeData.results?.[0]?.geometry?.location;
-  if (!location) return [];
 
-  const placesUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${location.lat},${location.lng}&radius=50000&type=tourist_attraction&key=${mapsKey}`;
-  const placesRes = await fetch(placesUrl);
+  if (geocodeData.status !== "OK" || !geocodeData.results?.[0]?.geometry?.location) {
+    logEvent("geocode_failed", {
+      destination,
+      status: geocodeData.status,
+      errorMessage: geocodeData.error_message,
+    });
+    return [];
+  }
+
+  const location = geocodeData.results[0].geometry.location;
+  const placesUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${location.lat},${location.lng}&radius=${PLACES_RADIUS_METERS}&type=tourist_attraction&key=${mapsKey}`;
+  const placesRes = await fetchWithTimeout(placesUrl);
   const placesData = await placesRes.json();
 
-  return (placesData.results ?? []).slice(0, 5).map((place: any, index: number) => ({
+  if (placesData.status !== "OK" && placesData.status !== "ZERO_RESULTS") {
+    logEvent("places_api_failed", {
+      destination,
+      status: placesData.status,
+      errorMessage: placesData.error_message,
+    });
+    return [];
+  }
+
+  return (placesData.results ?? []).slice(0, MAX_ATTRACTIONS).map((place: any, index: number) => ({
     id: place.place_id,
     name: place.name,
     description: place.vicinity ?? "Popular tourist attraction",
@@ -159,10 +238,13 @@ async function fetchPlacesAttractions(destination: string): Promise<AttractionDo
   }));
 }
 
-async function enrichWithWikipedia(attractions: AttractionDoc[]): Promise<AttractionDoc[]> {
+async function enrichWithWikipedia(
+  attractions: AttractionDoc[],
+  languageCode: string
+): Promise<AttractionDoc[]> {
   return Promise.all(
     attractions.map(async (attraction, index) => {
-      const wikiSummary = await fetchWikipediaSummary(attraction.name);
+      const wikiSummary = await fetchWikipediaSummary(attraction.name, languageCode);
       return {
         ...attraction,
         orderIndex: index,
@@ -175,14 +257,6 @@ async function enrichWithWikipedia(attractions: AttractionDoc[]): Promise<Attrac
   );
 }
 
-async function fetchWikipediaSummary(title: string): Promise<string> {
-  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
-  const response = await fetch(url);
-  if (!response.ok) return "";
-  const data = await response.json();
-  return typeof data.extract === "string" ? data.extract : "";
-}
-
 function extractJsonArray(text: string): string {
   const start = text.indexOf("[");
   const end = text.lastIndexOf("]");
@@ -190,4 +264,11 @@ function extractJsonArray(text: string): string {
     return text.slice(start, end + 1);
   }
   return text;
+}
+
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }

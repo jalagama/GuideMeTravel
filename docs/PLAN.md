@@ -29,7 +29,7 @@ todos:
   - id: hardening-compliance
     content: Harden background location across OEMs, add battery-optimization prompts, privacy policy and GDPR/CCPA/India DPDP consent flows, and prepare Play Store background-location justification.
     status: in_progress
-isProject: false
+isProject: true
 ---
 
 # AI Travel Companion - High-Level Development Plan
@@ -85,6 +85,8 @@ flowchart TD
     player --> room
 ```
 
+
+
 ## Trip Lifecycle (data flow)
 
 ```mermaid
@@ -105,6 +107,8 @@ sequenceDiagram
     A->>A: Geofence ENTER -> play local MP3
     U->>A: Trip complete -> delete pack
 ```
+
+
 
 ## Tech Stack
 
@@ -148,3 +152,4 @@ Reference blend: **Airbnb** (clean white cards, large rounded corners, photograp
 - Maps: MapLibre hybrid (assumed) vs pure Google Maps (simpler, weaker offline).
 - Pilot region for MVP (assumed Hampi).
 - Whether to use Cloud Run for guide-pack generation (assumed yes) vs chained Cloud Functions.
+

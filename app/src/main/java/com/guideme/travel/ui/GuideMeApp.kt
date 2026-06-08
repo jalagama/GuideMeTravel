@@ -1,6 +1,7 @@
 package com.guideme.travel.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -36,14 +37,40 @@ import com.guideme.travel.ui.summary.TripSummaryScreen
 import com.guideme.travel.ui.summary.TripSummaryViewModel
 
 @Composable
-fun GuideMeApp() {
+fun GuideMeApp(
+    onGoogleSignIn: () -> Unit = {}
+) {
     val navController = rememberNavController()
+    val launchViewModel: AppLaunchViewModel = hiltViewModel()
+    val launchState by launchViewModel.launchState.collectAsState()
+
+    LaunchedEffect(launchState) {
+        val currentRoute = navController.currentDestination?.route
+        if (currentRoute != null && currentRoute != OnboardingRoute::class.qualifiedName) return@LaunchedEffect
+
+        when {
+            !launchState.onboardingComplete -> Unit
+            launchState.isAuthenticated -> {
+                navController.navigate(HomeRoute) {
+                    popUpTo(OnboardingRoute) { inclusive = true }
+                }
+            }
+            else -> {
+                navController.navigate(AuthRoute) {
+                    popUpTo(OnboardingRoute) { inclusive = true }
+                }
+            }
+        }
+    }
 
     NavHost(
         navController = navController,
         startDestination = OnboardingRoute
     ) {
         composable<OnboardingRoute> {
+            if (launchState.onboardingComplete) {
+                return@composable
+            }
             OnboardingScreen(
                 onContinue = {
                     navController.navigate(ConsentRoute) {
@@ -71,15 +98,35 @@ fun GuideMeApp() {
         composable<AuthRoute> {
             val viewModel: AuthViewModel = hiltViewModel()
             val uiState by viewModel.uiState.collectAsState()
+
+            LaunchedEffect(uiState.isSignedIn) {
+                if (uiState.isSignedIn) {
+                    navController.navigate(HomeRoute) {
+                        popUpTo(AuthRoute) { inclusive = true }
+                    }
+                }
+            }
+
             AuthScreen(
                 uiState = uiState,
-                onSignIn = {
-                    viewModel.signIn {
+                onSignInAnonymously = {
+                    viewModel.signInAnonymously {
                         navController.navigate(HomeRoute) {
                             popUpTo(AuthRoute) { inclusive = true }
                         }
                     }
-                }
+                },
+                onSignInWithGoogle = onGoogleSignIn,
+                onSignInWithEmail = {
+                    viewModel.signInWithEmail {
+                        navController.navigate(HomeRoute) {
+                            popUpTo(AuthRoute) { inclusive = true }
+                        }
+                    }
+                },
+                onEmailChange = viewModel::updateEmail,
+                onPasswordChange = viewModel::updatePassword,
+                onToggleSignUpMode = viewModel::toggleSignUpMode
             )
         }
 
@@ -124,6 +171,7 @@ fun GuideMeApp() {
             DownloadPackScreen(
                 uiState = uiState,
                 onStartDownload = { viewModel.download(route.tripId) },
+                onCancelDownload = { viewModel.cancelDownload() },
                 onDone = { navController.popBackStack() },
                 onBack = { navController.popBackStack() }
             )
@@ -139,10 +187,12 @@ fun GuideMeApp() {
                 onPlayGuide = { attractionId ->
                     navController.navigate(GuidePlayerRoute(route.tripId, attractionId))
                 },
+                onRecenter = viewModel::toggleFollowUser,
                 onCompleteTrip = {
-                    viewModel.completeTrip()
-                    navController.navigate(TripSummaryRoute(route.tripId)) {
-                        popUpTo(HomeRoute)
+                    viewModel.completeTrip {
+                        navController.navigate(TripSummaryRoute(route.tripId)) {
+                            popUpTo(HomeRoute)
+                        }
                     }
                 }
             )
@@ -167,6 +217,11 @@ fun GuideMeApp() {
             TripSummaryScreen(
                 uiState = uiState,
                 onDeleteOfflineData = { viewModel.deleteOfflineData(route.tripId) },
+                onDeleteTrip = { viewModel.deleteTrip(route.tripId) {
+                    navController.navigate(HomeRoute) {
+                        popUpTo(HomeRoute) { inclusive = false }
+                    }
+                } },
                 onDone = {
                     navController.navigate(HomeRoute) {
                         popUpTo(HomeRoute) { inclusive = false }

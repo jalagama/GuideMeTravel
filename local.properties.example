@@ -1,0 +1,3 @@
+sdk.dir=/path/to/Android/sdk
+MAPTILER_API_KEY=your_maptiler_api_key
+GUIDE_PACK_BASE_URL=https://your-cloud-run-service-url

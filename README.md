@@ -4,6 +4,8 @@ AI-powered offline travel companion for Android with a serverless Google Cloud /
 
 **Development plan:** see [docs/PLAN.md](docs/PLAN.md)
 
+**Setup:** [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md) | **Privacy:** [docs/PRIVACY.md](docs/PRIVACY.md) | **Play Store:** [docs/PLAY_STORE_BACKGROUND_LOCATION.md](docs/PLAY_STORE_BACKGROUND_LOCATION.md)
+
 ## Project structure
 
 ```
@@ -19,24 +21,27 @@ GuideMeTravel/
 └── README.md
 ```
 
-## Phase 1 MVP (current)
+## Production features (current)
 
-Implemented per plan:
-
-- Onboarding → Privacy consent → Firebase anonymous auth → Home
-- Trip creation via Cloud Function (`generateItinerary`) with local Hampi fallback
-- Offline pack download via `generateGuidePack` + local transcript/audio cache
-- MapLibre map with attraction markers
-- Geofence foreground service + ExoPlayer MP3 (TTS fallback)
-- Trip summary with offline pack deletion
-- Battery optimization prompt for reliable background guides
+- Strict MVVM Clean Architecture with domain use-case layer
+- Global destination itinerary via `generateItinerary` (Places + Gemini + Wikipedia RAG)
+- Offline pack via Cloud Run `generateGuidePack` (parallel guide generation, Translate + TTS)
+- MapTiler + MapLibre offline tiles with live location puck and route markers
+- Geofence-triggered localized audio guides with deduplication and Media3 session
+- Google + Email + anonymous auth with Firestore `users/` profile sync
+- Trip lifecycle: offline cleanup with freed-space reporting, full trip delete
+- App Check, Crashlytics, Analytics, rate limiting, R8 release minification
 
 ### Open in Android Studio
 
 1. Open `/Users/malatheshkrishnappa/Documents/GuideMeTravel`
-2. Replace `app/google-services.json` with your Firebase project file
-3. Enable Anonymous Auth in Firebase Console
-4. Sync Gradle and run on device/emulator
+2. Copy `local.properties.example` → `local.properties` and set:
+   - `MAPTILER_API_KEY` — from [MapTiler](https://www.maptiler.com/)
+   - `GUIDE_PACK_BASE_URL` — your Cloud Run service URL (no trailing slash)
+3. Replace `app/google-services.json` with your Firebase project file
+4. Enable Anonymous, Google, and Email/Password auth in Firebase Console
+5. Enable App Check (Play Integrity) in Firebase Console
+6. Sync Gradle and run on device/emulator
 
 ### Build from terminal
 
@@ -73,7 +78,7 @@ firebase deploy
 | Function | Purpose |
 |---|---|
 | `generateItinerary` | Places + Wikipedia RAG + Gemini curation → Firestore trip |
-| `generateGuidePack` | Gemini script + Translate + Cloud TTS → Storage, globally cached |
+| Cloud Run `/generateGuidePack` | Gemini script + Translate + Cloud TTS → Storage (storage paths, fresh signed URLs) |
 
 ## Next steps (Phase 2+)
 

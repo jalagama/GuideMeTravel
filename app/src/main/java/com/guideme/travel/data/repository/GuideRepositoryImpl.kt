@@ -13,12 +13,13 @@ class GuideRepositoryImpl @Inject constructor(
     private val audioGuidePlayer: AudioGuidePlayer
 ) : GuideRepository {
 
-    override suspend fun playGuideForAttraction(attraction: Attraction) {
+    override suspend fun playGuideForAttraction(attraction: Attraction, languageCode: String) {
         audioGuidePlayer.playGuide(
             attractionId = attraction.id,
             attractionName = attraction.name,
             transcript = attraction.transcript.orEmpty(),
-            audioLocalPath = attraction.audioLocalPath
+            audioLocalPath = attraction.audioLocalPath,
+            languageCode = languageCode
         )
     }
 

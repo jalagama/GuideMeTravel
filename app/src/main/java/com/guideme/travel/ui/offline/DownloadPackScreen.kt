@@ -25,6 +25,7 @@ import com.guideme.travel.ui.components.GuideMeCard
 fun DownloadPackScreen(
     uiState: DownloadPackUiState,
     onStartDownload: () -> Unit,
+    onCancelDownload: () -> Unit,
     onDone: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -50,7 +51,7 @@ fun DownloadPackScreen(
             Text("• Curated route and attraction markers")
             Text("• Offline map tiles for the destination region")
             Text("• Pre-generated audio guides in your selected language")
-            Text("Estimated size: ${uiState.progress?.estimatedSizeMb ?: 120} MB")
+            Text("Estimated size: ${uiState.estimatedSizeMb.takeIf { it > 0 } ?: uiState.progress?.estimatedSizeMb ?: 0} MB")
         }
 
         if (uiState.progress != null) {
@@ -81,8 +82,14 @@ fun DownloadPackScreen(
             ) {
                 Text(if (uiState.isDownloading) "Downloading..." else "Start download")
             }
-            OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
-                Text("Cancel")
+            if (uiState.isDownloading) {
+                OutlinedButton(onClick = onCancelDownload, modifier = Modifier.fillMaxWidth()) {
+                    Text("Cancel download")
+                }
+            } else {
+                OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+                    Text("Back")
+                }
             }
         }
     }

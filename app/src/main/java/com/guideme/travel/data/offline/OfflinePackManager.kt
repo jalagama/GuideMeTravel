@@ -11,6 +11,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.net.HttpURLConnection
 import java.net.URL
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -19,14 +20,16 @@ import javax.inject.Singleton
 class OfflinePackManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val remoteDataSource: FirebaseTripRemoteDataSource,
-    private val attractionDao: AttractionDao
+    private val attractionDao: AttractionDao,
+    private val mapOfflineManager: MapLibreOfflineMapManager
 ) {
     fun tripPackDir(tripId: String): File {
         return File(context.filesDir, "offline_packs/$tripId").apply { mkdirs() }
     }
 
     fun estimatePackSizeMb(trip: TripPlan): Int {
-        return 40 + (trip.attractions.size * 15)
+        return trip.offlinePackSizeMb.takeIf { it > 0 }
+            ?: (45 + (trip.attractions.size * 3))
     }
 
     suspend fun downloadPack(
@@ -41,8 +44,7 @@ class OfflinePackManager @Inject constructor(
         onProgress(step(tripId, 0, totalSteps, "Fetching guide scripts", trip))
 
         val guideFiles = if (useFirebase) {
-            runCatching { remoteDataSource.generateGuidePack(tripId) }
-                .getOrElse { buildLocalGuideFiles(trip) }
+            remoteDataSource.generateGuidePack(tripId)
         } else {
             buildLocalGuideFiles(trip)
         }
@@ -52,13 +54,13 @@ class OfflinePackManager @Inject constructor(
         val updatedAttractions = trip.attractions.map { attraction ->
             val guide = guideFiles.firstOrNull {
                 it.attractionId == attraction.id ||
-                    it.attractionId.endsWith(attraction.id.substringAfterLast("_"))
-            }
-            if (guide == null) return@map attraction
+                    it.attractionId.endsWith(attraction.id.substringAfterLast("_")) ||
+                    attraction.id.endsWith(it.attractionId)
+            } ?: return@map attraction
 
             val audioFile = File(packDir, "${attraction.id}.mp3")
             if (guide.url.startsWith("http")) {
-                runCatching { downloadFile(guide.url, audioFile) }
+                downloadFile(guide.url, audioFile)
             }
 
             val transcriptFile = File(packDir, "${attraction.id}.txt")
@@ -76,27 +78,40 @@ class OfflinePackManager @Inject constructor(
             )
         }
 
-        onProgress(step(tripId, 2, totalSteps, "Preparing offline map region", trip))
-        File(packDir, "map_region.json").writeText(
-            buildMapRegionMetadata(updatedAttractions)
-        )
+        onProgress(step(tripId, 2, totalSteps, "Downloading offline map tiles", trip))
+        mapOfflineManager.downloadRegion(tripId, updatedAttractions) { mapPercent ->
+            onProgress(
+                step(
+                    tripId,
+                    2,
+                    totalSteps,
+                    "Downloading offline map tiles ($mapPercent%)",
+                    trip
+                )
+            )
+        }
 
         onProgress(step(tripId, 3, totalSteps, "Saving offline pack", trip))
         onProgress(step(tripId, totalSteps, totalSteps, "Complete", trip))
 
+        val actualSizeMb = (packSizeBytes(tripId) / (1024 * 1024)).toInt().coerceAtLeast(1)
+
         trip.copy(
             attractions = updatedAttractions,
             offlinePackDownloaded = true,
-            offlinePackSizeMb = estimatePackSizeMb(trip)
+            offlinePackSizeMb = actualSizeMb
         )
     }
 
     suspend fun deletePack(tripId: String) = withContext(Dispatchers.IO) {
+        mapOfflineManager.deleteRegionsForTrip(tripId)
         tripPackDir(tripId).deleteRecursively()
     }
 
     fun packSizeBytes(tripId: String): Long {
-        return tripPackDir(tripId).walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        val packDir = tripPackDir(tripId)
+        if (!packDir.exists()) return 0L
+        return packDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
     }
 
     private fun buildLocalGuideFiles(trip: TripPlan): List<GuidePackFile> {
@@ -104,6 +119,7 @@ class OfflinePackManager @Inject constructor(
             GuidePackFile(
                 attractionId = attraction.id,
                 url = "",
+                storagePath = null,
                 transcript = attraction.transcript
                     ?: "Welcome to ${attraction.name}. ${attraction.description}"
             )
@@ -111,25 +127,15 @@ class OfflinePackManager @Inject constructor(
     }
 
     private fun downloadFile(url: String, destination: File) {
-        URL(url).openStream().use { input ->
+        val connection = URL(url).openConnection() as HttpURLConnection
+        connection.connectTimeout = 30_000
+        connection.readTimeout = 120_000
+        connection.inputStream.use { input ->
             destination.outputStream().use { output ->
                 input.copyTo(output)
             }
         }
-    }
-
-    private fun buildMapRegionMetadata(attractions: List<Attraction>): String {
-        val lats = attractions.map { it.latitude }
-        val lngs = attractions.map { it.longitude }
-        return """
-            {
-              "minLat": ${lats.minOrNull() ?: 0.0},
-              "maxLat": ${lats.maxOrNull() ?: 0.0},
-              "minLng": ${lngs.minOrNull() ?: 0.0},
-              "maxLng": ${lngs.maxOrNull() ?: 0.0},
-              "spotCount": ${attractions.size}
-            }
-        """.trimIndent()
+        connection.disconnect()
     }
 
     private fun step(

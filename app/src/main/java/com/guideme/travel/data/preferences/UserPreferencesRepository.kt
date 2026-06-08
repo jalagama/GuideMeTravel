@@ -24,6 +24,8 @@ class UserPreferencesRepository @Inject constructor(
     private val locationConsentKey = booleanPreferencesKey("location_consent")
     private val privacyConsentKey = booleanPreferencesKey("privacy_consent")
     private val useFirebaseBackendKey = booleanPreferencesKey("use_firebase_backend")
+    private val defaultLanguageCodeKey = androidx.datastore.preferences.core.stringPreferencesKey("default_language_code")
+    private val wifiOnlyDownloadsKey = booleanPreferencesKey("wifi_only_downloads")
 
     val onboardingComplete: Flow<Boolean> = context.userPreferencesDataStore.data.map {
         it[onboardingCompleteKey] ?: false
@@ -41,6 +43,14 @@ class UserPreferencesRepository @Inject constructor(
         it[useFirebaseBackendKey] ?: true
     }
 
+    val defaultLanguageCode: Flow<String> = context.userPreferencesDataStore.data.map {
+        it[defaultLanguageCodeKey] ?: "en"
+    }
+
+    val wifiOnlyDownloads: Flow<Boolean> = context.userPreferencesDataStore.data.map {
+        it[wifiOnlyDownloadsKey] ?: false
+    }
+
     suspend fun setOnboardingComplete(value: Boolean) {
         context.userPreferencesDataStore.edit { it[onboardingCompleteKey] = value }
     }
@@ -55,5 +65,13 @@ class UserPreferencesRepository @Inject constructor(
 
     suspend fun setUseFirebaseBackend(value: Boolean) {
         context.userPreferencesDataStore.edit { it[useFirebaseBackendKey] = value }
+    }
+
+    suspend fun setDefaultLanguageCode(value: String) {
+        context.userPreferencesDataStore.edit { it[defaultLanguageCodeKey] = value }
+    }
+
+    suspend fun setWifiOnlyDownloads(value: Boolean) {
+        context.userPreferencesDataStore.edit { it[wifiOnlyDownloadsKey] = value }
     }
 }

@@ -48,14 +48,37 @@ fun ItineraryScreen(
     val trip = uiState.trip
     val context = LocalContext.current
     var permissionMessage by remember { mutableStateOf<String?>(null) }
+    var pendingStartTrip by remember { mutableStateOf(false) }
+
+    val backgroundLocationLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        permissionMessage = if (!granted) {
+            "Background location improves automatic guides when your phone is locked."
+        } else {
+            null
+        }
+        if (pendingStartTrip) {
+            pendingStartTrip = false
+            onStartTrip()
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
+    ) {
         val locationGranted = LocationPermissionHelper.hasFineOrCoarseLocation(context)
         if (locationGranted) {
-            permissionMessage = null
-            onStartTrip()
+            val backgroundPermission = LocationPermissionHelper.backgroundLocationPermission()
+            if (backgroundPermission != null &&
+                !LocationPermissionHelper.hasBackgroundLocation(context)
+            ) {
+                pendingStartTrip = true
+                backgroundLocationLauncher.launch(backgroundPermission)
+            } else {
+                permissionMessage = null
+                onStartTrip()
+            }
         } else {
             permissionMessage = "Location permission is required to start the trip guide."
         }
@@ -63,8 +86,16 @@ fun ItineraryScreen(
 
     fun handleStartTrip() {
         if (LocationPermissionHelper.canStartLocationForegroundService(context)) {
-            permissionMessage = null
-            onStartTrip()
+            val backgroundPermission = LocationPermissionHelper.backgroundLocationPermission()
+            if (backgroundPermission != null &&
+                !LocationPermissionHelper.hasBackgroundLocation(context)
+            ) {
+                pendingStartTrip = true
+                backgroundLocationLauncher.launch(backgroundPermission)
+            } else {
+                permissionMessage = null
+                onStartTrip()
+            }
         } else {
             permissionLauncher.launch(LocationPermissionHelper.startTripPermissions())
         }

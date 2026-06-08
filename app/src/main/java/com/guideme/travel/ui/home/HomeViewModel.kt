@@ -3,7 +3,10 @@ package com.guideme.travel.ui.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.guideme.travel.domain.model.TripPlan
-import com.guideme.travel.domain.repository.TripRepository
+import com.guideme.travel.domain.usecase.CreateTripUseCase
+import com.guideme.travel.domain.usecase.ObserveDefaultLanguageUseCase
+import com.guideme.travel.domain.usecase.ObserveTripsUseCase
+import com.guideme.travel.domain.usecase.SetDefaultLanguageUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -25,18 +28,27 @@ data class HomeUiState(
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val tripRepository: TripRepository
+    private val createTripUseCase: CreateTripUseCase,
+    private val observeTripsUseCase: ObserveTripsUseCase,
+    private val observeDefaultLanguageUseCase: ObserveDefaultLanguageUseCase,
+    private val setDefaultLanguageUseCase: SetDefaultLanguageUseCase
 ) : ViewModel() {
 
-    private val formState = MutableStateFlow(
-        HomeUiState()
-    )
+    private val formState = MutableStateFlow(HomeUiState())
 
     val uiState: StateFlow<HomeUiState> = combine(
         formState,
-        tripRepository.observeTrips()
-    ) { form, trips ->
-        form.copy(recentTrips = trips)
+        observeTripsUseCase(),
+        observeDefaultLanguageUseCase()
+    ) { form, trips, defaultLanguage ->
+        form.copy(
+            recentTrips = trips,
+            languageCode = if (form.languageCode == "en" && defaultLanguage != "en") {
+                defaultLanguage
+            } else {
+                form.languageCode
+            }
+        )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
@@ -53,6 +65,9 @@ class HomeViewModel @Inject constructor(
 
     fun updateLanguage(value: String) {
         formState.update { it.copy(languageCode = value) }
+        viewModelScope.launch {
+            setDefaultLanguageUseCase(value)
+        }
     }
 
     fun createPlan(onSuccess: (String) -> Unit) {
@@ -65,7 +80,7 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             formState.update { it.copy(isLoading = true, errorMessage = null) }
             runCatching {
-                tripRepository.createTrip(
+                createTripUseCase(
                     origin = current.origin.trim(),
                     destination = current.destination.trim(),
                     languageCode = current.languageCode

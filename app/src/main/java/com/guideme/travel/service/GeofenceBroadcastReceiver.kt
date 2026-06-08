@@ -21,6 +21,7 @@ class GeofenceBroadcastReceiver : BroadcastReceiver() {
         val event = GeofencingEvent.fromIntent(intent) ?: return
         if (event.hasError()) {
             val errorMessage = GeofenceStatusCodes.getStatusCodeString(event.errorCode)
+            android.util.Log.e("GeofenceReceiver", "Geofence error: $errorMessage")
             return
         }
 

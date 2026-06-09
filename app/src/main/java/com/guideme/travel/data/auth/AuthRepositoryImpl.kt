@@ -1,5 +1,6 @@
 package com.guideme.travel.data.auth
 
+import com.google.firebase.auth.ActionCodeSettings
 import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
@@ -16,6 +17,12 @@ import javax.inject.Singleton
 class AuthRepositoryImpl @Inject constructor(
     private val firebaseAuth: FirebaseAuth
 ) : AuthRepository {
+
+    companion object {
+        private const val EMAIL_LINK_CONTINUE_URL =
+            "https://travelguide-47f80.firebaseapp.com/finishSignIn"
+        private const val ANDROID_PACKAGE_NAME = "com.guideme.travel"
+    }
 
     override val authState: Flow<AuthUser?> = callbackFlow {
         val listener = FirebaseAuth.AuthStateListener { auth ->
@@ -44,15 +51,37 @@ class AuthRepositoryImpl @Inject constructor(
         return user.toAuthUser()
     }
 
-    override suspend fun signInWithEmail(email: String, password: String): AuthUser {
-        val user = firebaseAuth.signInWithEmailAndPassword(email, password).await().user
-            ?: error("Email sign-in failed")
-        return user.toAuthUser()
+    override suspend fun sendSignInLink(email: String) {
+        val actionCodeSettings = ActionCodeSettings.newBuilder()
+            .setUrl(EMAIL_LINK_CONTINUE_URL)
+            .setHandleCodeInApp(true)
+            .setAndroidPackageName(ANDROID_PACKAGE_NAME, true, null)
+            .build()
+        firebaseAuth.sendSignInLinkToEmail(email, actionCodeSettings).await()
     }
 
-    override suspend fun signUpWithEmail(email: String, password: String): AuthUser {
-        val user = firebaseAuth.createUserWithEmailAndPassword(email, password).await().user
-            ?: error("Email sign-up failed")
+    override fun isSignInWithEmailLink(link: String): Boolean {
+        return firebaseAuth.isSignInWithEmailLink(link)
+    }
+
+    override suspend fun completeSignInFromLink(email: String, link: String): AuthUser {
+        if (!firebaseAuth.isSignInWithEmailLink(link)) {
+            error("Invalid sign-in link")
+        }
+
+        val credential = EmailAuthProvider.getCredentialWithLink(email, link)
+        val current = firebaseAuth.currentUser
+
+        val user = if (current != null && current.isAnonymous) {
+            runCatching {
+                current.linkWithCredential(credential).await().user
+            }.getOrElse {
+                firebaseAuth.signInWithEmailLink(email, link).await().user
+            }
+        } else {
+            firebaseAuth.signInWithEmailLink(email, link).await().user
+        } ?: error("Email link sign-in failed")
+
         return user.toAuthUser()
     }
 
@@ -62,21 +91,6 @@ class AuthRepositoryImpl @Inject constructor(
         val credential = GoogleAuthProvider.getCredential(idToken, null)
         val user = current.linkWithCredential(credential).await().user
             ?: error("Failed to link Google account")
-        return user.toAuthUser()
-    }
-
-    override suspend fun linkAnonymousWithEmail(email: String, password: String): AuthUser {
-        val current = firebaseAuth.currentUser
-        if (current == null || !current.isAnonymous) {
-            return runCatching { signInWithEmail(email, password) }
-                .getOrElse { signUpWithEmail(email, password) }
-        }
-        val credential = EmailAuthProvider.getCredential(email, password)
-        val user = runCatching {
-            current.linkWithCredential(credential).await().user
-        }.getOrElse {
-            signUpWithEmail(email, password).let { firebaseAuth.currentUser }
-        } ?: error("Failed to link email account")
         return user.toAuthUser()
     }
 

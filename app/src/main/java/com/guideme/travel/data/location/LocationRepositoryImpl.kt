@@ -14,6 +14,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -45,5 +46,15 @@ class LocationRepositoryImpl @Inject constructor(
 
         fusedClient.requestLocationUpdates(request, callback, Looper.getMainLooper())
         awaitClose { fusedClient.removeLocationUpdates(callback) }
+    }
+
+    @SuppressLint("MissingPermission")
+    override suspend fun getLastLocation(): UserLocation? {
+        val location = fusedClient.lastLocation.await() ?: return null
+        return UserLocation(
+            latitude = location.latitude,
+            longitude = location.longitude,
+            bearing = location.bearing
+        )
     }
 }

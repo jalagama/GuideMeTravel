@@ -9,6 +9,8 @@ interface PreferencesRepository {
     val useFirebaseBackend: Flow<Boolean>
     val defaultLanguageCode: Flow<String>
     val wifiOnlyDownloads: Flow<Boolean>
+    val pendingSignInEmail: Flow<String?>
+    val countryCode: Flow<String?>
 
     suspend fun setOnboardingComplete(value: Boolean)
     suspend fun setLocationConsent(value: Boolean)
@@ -16,4 +18,6 @@ interface PreferencesRepository {
     suspend fun setUseFirebaseBackend(value: Boolean)
     suspend fun setDefaultLanguageCode(value: String)
     suspend fun setWifiOnlyDownloads(value: Boolean)
+    suspend fun setPendingSignInEmail(value: String?)
+    suspend fun setCountryCode(value: String?)
 }

@@ -9,11 +9,13 @@ import com.guideme.travel.data.auth.AuthRepositoryImpl
 import com.guideme.travel.data.local.GuideMeDatabase
 import com.guideme.travel.data.location.LocationRepositoryImpl
 import com.guideme.travel.data.preferences.PreferencesRepositoryImpl
+import com.guideme.travel.data.repository.CuratedContentRepositoryImpl
 import com.guideme.travel.data.repository.GuideRepositoryImpl
 import com.guideme.travel.data.repository.TripRepositoryImpl
 import com.guideme.travel.data.repository.UserRepositoryImpl
 import com.guideme.travel.data.work.DownloadWorkRepositoryImpl
 import com.guideme.travel.domain.repository.AuthRepository
+import com.guideme.travel.domain.repository.CuratedContentRepository
 import com.guideme.travel.domain.repository.DownloadWorkRepository
 import com.guideme.travel.domain.repository.GuideRepository
 import com.guideme.travel.domain.repository.LocationRepository
@@ -101,4 +103,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindDownloadWorkRepository(impl: DownloadWorkRepositoryImpl): DownloadWorkRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindCuratedContentRepository(impl: CuratedContentRepositoryImpl): CuratedContentRepository
 }

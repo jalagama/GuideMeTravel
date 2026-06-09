@@ -6,6 +6,7 @@ import com.guideme.travel.domain.repository.PreferencesRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 
 class ObserveOnboardingCompleteUseCase @Inject constructor(
@@ -79,15 +80,11 @@ class GetAppLaunchStateUseCase @Inject constructor(
 }
 
 class ObserveAppLaunchStateUseCase @Inject constructor(
-    private val preferencesRepository: PreferencesRepository,
     private val authRepository: AuthRepository
 ) {
-    operator fun invoke(): Flow<AppLaunchState> = combine(
-        preferencesRepository.onboardingComplete,
-        authRepository.authState
-    ) { onboardingComplete, user ->
+    operator fun invoke(): Flow<AppLaunchState> = authRepository.authState.map { user ->
         AppLaunchState(
-            onboardingComplete = onboardingComplete,
+            onboardingComplete = true,
             isAuthenticated = user != null
         )
     }

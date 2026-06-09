@@ -9,6 +9,7 @@ import com.guideme.travel.domain.repository.DownloadWorkRepository
 import com.guideme.travel.domain.usecase.GetOfflinePackSizeUseCase
 import com.guideme.travel.domain.usecase.ObserveTripUseCase
 import com.guideme.travel.domain.usecase.ObserveWifiOnlyDownloadsUseCase
+import com.guideme.travel.domain.usecase.StartTripUseCase
 import com.guideme.travel.ui.navigation.DownloadRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,7 +36,8 @@ class DownloadPackViewModel @Inject constructor(
     private val downloadWorkRepository: DownloadWorkRepository,
     private val observeTripUseCase: ObserveTripUseCase,
     private val observeWifiOnlyDownloadsUseCase: ObserveWifiOnlyDownloadsUseCase,
-    private val getOfflinePackSizeUseCase: GetOfflinePackSizeUseCase
+    private val getOfflinePackSizeUseCase: GetOfflinePackSizeUseCase,
+    private val startTripUseCase: StartTripUseCase
 ) : ViewModel() {
 
     private val tripId: String = savedStateHandle.toRoute<DownloadRoute>().tripId
@@ -95,4 +97,10 @@ class DownloadPackViewModel @Inject constructor(
     }
 
     suspend fun currentPackSizeBytes(): Long = getOfflinePackSizeUseCase(tripId)
+
+    fun startTripOnline() {
+        viewModelScope.launch {
+            startTripUseCase(tripId)
+        }
+    }
 }

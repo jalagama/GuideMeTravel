@@ -16,6 +16,8 @@ class PreferencesRepositoryImpl @Inject constructor(
     override val useFirebaseBackend: Flow<Boolean> = userPreferencesRepository.useFirebaseBackend
     override val defaultLanguageCode: Flow<String> = userPreferencesRepository.defaultLanguageCode
     override val wifiOnlyDownloads: Flow<Boolean> = userPreferencesRepository.wifiOnlyDownloads
+    override val pendingSignInEmail: Flow<String?> = userPreferencesRepository.pendingSignInEmail
+    override val countryCode: Flow<String?> = userPreferencesRepository.countryCode
 
     override suspend fun setOnboardingComplete(value: Boolean) {
         userPreferencesRepository.setOnboardingComplete(value)
@@ -39,5 +41,13 @@ class PreferencesRepositoryImpl @Inject constructor(
 
     override suspend fun setWifiOnlyDownloads(value: Boolean) {
         userPreferencesRepository.setWifiOnlyDownloads(value)
+    }
+
+    override suspend fun setPendingSignInEmail(value: String?) {
+        userPreferencesRepository.setPendingSignInEmail(value)
+    }
+
+    override suspend fun setCountryCode(value: String?) {
+        userPreferencesRepository.setCountryCode(value)
     }
 }

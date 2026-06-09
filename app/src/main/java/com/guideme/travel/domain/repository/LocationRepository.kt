@@ -5,4 +5,5 @@ import kotlinx.coroutines.flow.Flow
 
 interface LocationRepository {
     fun observeLocation(): Flow<UserLocation?>
+    suspend fun getLastLocation(): UserLocation?
 }

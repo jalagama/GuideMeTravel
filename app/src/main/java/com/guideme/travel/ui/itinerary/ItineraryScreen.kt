@@ -12,12 +12,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -30,7 +26,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.guideme.travel.R
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import coil.compose.AsyncImage
@@ -42,8 +40,7 @@ import com.guideme.travel.util.LocationPermissionHelper
 fun ItineraryScreen(
     uiState: ItineraryUiState,
     onDownload: () -> Unit,
-    onStartTrip: () -> Unit,
-    onBack: () -> Unit
+    onStartTrip: () -> Unit
 ) {
     val trip = uiState.trip
     val context = LocalContext.current
@@ -102,18 +99,6 @@ fun ItineraryScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
-            Text("Your itinerary", style = MaterialTheme.typography.headlineMedium)
-        }
-
         if (uiState.isLoading || trip == null) {
             Column(
                 modifier = Modifier.fillMaxSize(),
@@ -132,12 +117,18 @@ fun ItineraryScreen(
         ) {
             item {
                 GuideMeCard {
-                    Text(
-                        text = "${trip.origin} → ${trip.destination}",
-                        style = MaterialTheme.typography.titleLarge
-                    )
-                    Text("${trip.attractions.size} curated spots around ${trip.destination}")
-                    Text("Estimated offline pack: ${trip.offlinePackSizeMb} MB")
+                    Text(trip.destination, style = MaterialTheme.typography.titleLarge)
+                    Text("${trip.attractions.size} curated spots")
+                    if (trip.offlinePackDownloaded) {
+                        Text(stringResource(R.string.offline_pack_ready_hint))
+                    } else {
+                        Text(
+                            stringResource(
+                                R.string.offline_pack_optional_hint,
+                                trip.offlinePackSizeMb
+                            )
+                        )
+                    }
                 }
             }
 
@@ -152,9 +143,6 @@ fun ItineraryScreen(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            OutlinedButton(onClick = onDownload, modifier = Modifier.fillMaxWidth()) {
-                Text(if (trip.offlinePackDownloaded) "Re-download offline pack" else "Download offline pack")
-            }
             if (permissionMessage != null) {
                 Text(
                     text = permissionMessage!!,
@@ -164,10 +152,31 @@ fun ItineraryScreen(
             }
             Button(
                 onClick = { handleStartTrip() },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = trip.offlinePackDownloaded
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Start trip")
+                Text(
+                    if (trip.offlinePackDownloaded) {
+                        stringResource(R.string.start_trip)
+                    } else {
+                        stringResource(R.string.start_trip_online)
+                    }
+                )
+            }
+            if (!trip.offlinePackDownloaded) {
+                Text(
+                    text = stringResource(R.string.start_trip_online_hint),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            OutlinedButton(onClick = onDownload, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    if (trip.offlinePackDownloaded) {
+                        stringResource(R.string.redownload_offline_pack)
+                    } else {
+                        stringResource(R.string.download_offline_pack)
+                    }
+                )
             }
         }
     }

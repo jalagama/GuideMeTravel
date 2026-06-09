@@ -15,6 +15,15 @@ object AuthRoute
 object HomeRoute
 
 @Serializable
+object TripsRoute
+
+@Serializable
+data class GenreDetailRoute(val countryCode: String, val genreId: String)
+
+@Serializable
+data class TourPackageDetailRoute(val packageId: String)
+
+@Serializable
 data class ItineraryRoute(val tripId: String)
 
 @Serializable

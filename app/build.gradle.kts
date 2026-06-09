@@ -41,6 +41,11 @@ android {
             "GUIDE_PACK_BASE_URL",
             "\"${localProperties.getProperty("GUIDE_PACK_BASE_URL", "https://guide-pack-service-url")}\""
         )
+        buildConfigField(
+            "String",
+            "PLACES_API_KEY",
+            "\"${localProperties.getProperty("PLACES_API_KEY", localProperties.getProperty("GOOGLE_MAPS_API_KEY", ""))}\""
+        )
     }
 
     buildTypes {
@@ -96,6 +101,7 @@ dependencies {
     implementation(libs.media3.session)
     implementation(libs.play.services.location)
     implementation(libs.play.services.auth)
+    implementation(libs.places)
     implementation(libs.maplibre.android)
 
     implementation(libs.hilt.android)

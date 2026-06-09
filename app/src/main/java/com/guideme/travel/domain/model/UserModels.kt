@@ -12,7 +12,8 @@ data class UserProfile(
     val displayName: String?,
     val email: String?,
     val languageCode: String,
-    val createdAtMillis: Long
+    val createdAtMillis: Long,
+    val countryCode: String? = null
 )
 
 data class SupportedLanguage(

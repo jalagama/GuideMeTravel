@@ -26,6 +26,8 @@ class UserPreferencesRepository @Inject constructor(
     private val useFirebaseBackendKey = booleanPreferencesKey("use_firebase_backend")
     private val defaultLanguageCodeKey = androidx.datastore.preferences.core.stringPreferencesKey("default_language_code")
     private val wifiOnlyDownloadsKey = booleanPreferencesKey("wifi_only_downloads")
+    private val pendingSignInEmailKey = androidx.datastore.preferences.core.stringPreferencesKey("pending_sign_in_email")
+    private val countryCodeKey = androidx.datastore.preferences.core.stringPreferencesKey("country_code")
 
     val onboardingComplete: Flow<Boolean> = context.userPreferencesDataStore.data.map {
         it[onboardingCompleteKey] ?: false
@@ -51,6 +53,14 @@ class UserPreferencesRepository @Inject constructor(
         it[wifiOnlyDownloadsKey] ?: false
     }
 
+    val pendingSignInEmail: Flow<String?> = context.userPreferencesDataStore.data.map {
+        it[pendingSignInEmailKey]
+    }
+
+    val countryCode: Flow<String?> = context.userPreferencesDataStore.data.map {
+        it[countryCodeKey]
+    }
+
     suspend fun setOnboardingComplete(value: Boolean) {
         context.userPreferencesDataStore.edit { it[onboardingCompleteKey] = value }
     }
@@ -73,5 +83,25 @@ class UserPreferencesRepository @Inject constructor(
 
     suspend fun setWifiOnlyDownloads(value: Boolean) {
         context.userPreferencesDataStore.edit { it[wifiOnlyDownloadsKey] = value }
+    }
+
+    suspend fun setPendingSignInEmail(value: String?) {
+        context.userPreferencesDataStore.edit {
+            if (value == null) {
+                it.remove(pendingSignInEmailKey)
+            } else {
+                it[pendingSignInEmailKey] = value
+            }
+        }
+    }
+
+    suspend fun setCountryCode(value: String?) {
+        context.userPreferencesDataStore.edit {
+            if (value == null) {
+                it.remove(countryCodeKey)
+            } else {
+                it[countryCodeKey] = value
+            }
+        }
     }
 }

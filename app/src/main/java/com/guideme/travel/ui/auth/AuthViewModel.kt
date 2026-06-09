@@ -2,12 +2,14 @@ package com.guideme.travel.ui.auth
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.guideme.travel.data.auth.PendingEmailLinkStore
+import com.guideme.travel.domain.repository.PreferencesRepository
+import com.guideme.travel.domain.usecase.CompleteSignInFromLinkUseCase
 import com.guideme.travel.domain.usecase.ObserveAuthStateUseCase
 import com.guideme.travel.domain.usecase.ObserveDefaultLanguageUseCase
+import com.guideme.travel.domain.usecase.SendSignInLinkUseCase
 import com.guideme.travel.domain.usecase.SignInAnonymouslyUseCase
-import com.guideme.travel.domain.usecase.SignInWithEmailUseCase
 import com.guideme.travel.domain.usecase.SignInWithGoogleUseCase
-import com.guideme.travel.domain.usecase.SignUpWithEmailUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,8 +25,7 @@ data class AuthUiState(
     val isLoading: Boolean = false,
     val isSignedIn: Boolean = false,
     val email: String = "",
-    val password: String = "",
-    val isSignUpMode: Boolean = false,
+    val linkSent: Boolean = false,
     val errorMessage: String? = null
 )
 
@@ -33,9 +34,11 @@ class AuthViewModel @Inject constructor(
     private val observeAuthStateUseCase: ObserveAuthStateUseCase,
     private val signInAnonymouslyUseCase: SignInAnonymouslyUseCase,
     private val signInWithGoogleUseCase: SignInWithGoogleUseCase,
-    private val signInWithEmailUseCase: SignInWithEmailUseCase,
-    private val signUpWithEmailUseCase: SignUpWithEmailUseCase,
-    private val observeDefaultLanguageUseCase: ObserveDefaultLanguageUseCase
+    private val sendSignInLinkUseCase: SendSignInLinkUseCase,
+    private val completeSignInFromLinkUseCase: CompleteSignInFromLinkUseCase,
+    private val observeDefaultLanguageUseCase: ObserveDefaultLanguageUseCase,
+    private val preferencesRepository: PreferencesRepository,
+    private val pendingEmailLinkStore: PendingEmailLinkStore
 ) : ViewModel() {
 
     private val formState = MutableStateFlow(AuthUiState())
@@ -51,16 +54,18 @@ class AuthViewModel @Inject constructor(
         initialValue = AuthUiState()
     )
 
+    init {
+        viewModelScope.launch {
+            pendingEmailLinkStore.pendingLink.collect { link ->
+                if (!link.isNullOrBlank()) {
+                    completePendingEmailLink(link)
+                }
+            }
+        }
+    }
+
     fun updateEmail(value: String) {
-        formState.update { it.copy(email = value) }
-    }
-
-    fun updatePassword(value: String) {
-        formState.update { it.copy(password = value) }
-    }
-
-    fun toggleSignUpMode() {
-        formState.update { it.copy(isSignUpMode = !it.isSignUpMode, errorMessage = null) }
+        formState.update { it.copy(email = value, linkSent = false, errorMessage = null) }
     }
 
     fun signInAnonymously(onSuccess: () -> Unit) {
@@ -97,32 +102,64 @@ class AuthViewModel @Inject constructor(
         }
     }
 
-    fun signInWithEmail(onSuccess: () -> Unit) {
+    fun sendSignInLink() {
         val current = formState.value
-        if (current.email.isBlank() || current.password.length < 6) {
-            formState.update { it.copy(errorMessage = "Enter a valid email and password (6+ chars)") }
+        if (current.email.isBlank() || !current.email.contains("@")) {
+            formState.update { it.copy(errorMessage = "Enter a valid email address") }
             return
         }
 
         viewModelScope.launch {
             formState.update { it.copy(isLoading = true, errorMessage = null) }
-            val language = observeDefaultLanguageUseCase().first()
-            runCatching {
-                if (current.isSignUpMode) {
-                    signUpWithEmailUseCase(current.email.trim(), current.password, language)
-                } else {
-                    signInWithEmailUseCase(current.email.trim(), current.password, language)
-                }
-            }
+            runCatching { sendSignInLinkUseCase(current.email.trim()) }
                 .onSuccess {
-                    formState.update { it.copy(isLoading = false) }
-                    onSuccess()
+                    formState.update {
+                        it.copy(isLoading = false, linkSent = true, errorMessage = null)
+                    }
                 }
                 .onFailure { error ->
                     formState.update {
-                        it.copy(isLoading = false, errorMessage = error.message ?: "Email sign-in failed")
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = error.message ?: "Failed to send sign-in link"
+                        )
                     }
                 }
         }
+    }
+
+    fun handleEmailLink(link: String, onSuccess: () -> Unit) {
+        pendingEmailLinkStore.setLink(link)
+        viewModelScope.launch {
+            completePendingEmailLink(link, onSuccess)
+        }
+    }
+
+    private suspend fun completePendingEmailLink(link: String, onSuccess: (() -> Unit)? = null) {
+        val email = preferencesRepository.pendingSignInEmail.first()
+            ?: formState.value.email.takeIf { it.isNotBlank() }
+        if (email.isNullOrBlank()) {
+            formState.update {
+                it.copy(errorMessage = "Enter the same email address you used to request the link")
+            }
+            return
+        }
+
+        formState.update { it.copy(isLoading = true, errorMessage = null) }
+        val language = observeDefaultLanguageUseCase().first()
+        runCatching { completeSignInFromLinkUseCase(email, link, language) }
+            .onSuccess {
+                pendingEmailLinkStore.consumeLink()
+                formState.update { it.copy(isLoading = false) }
+                onSuccess?.invoke()
+            }
+            .onFailure { error ->
+                formState.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = error.message ?: "Email link sign-in failed"
+                    )
+                }
+            }
     }
 }

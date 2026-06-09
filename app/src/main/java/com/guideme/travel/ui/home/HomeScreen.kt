@@ -1,130 +1,185 @@
 package com.guideme.travel.ui.home
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.guideme.travel.domain.model.LanguageOptions
+import coil.compose.AsyncImage
+import com.guideme.travel.R
+import com.guideme.travel.domain.model.CuratedGenre
 import com.guideme.travel.ui.components.GuideMeCard
+import com.guideme.travel.util.LocationPermissionHelper
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     uiState: HomeUiState,
-    onOriginChange: (String) -> Unit,
-    onDestinationChange: (String) -> Unit,
-    onLanguageChange: (String) -> Unit,
-    onCreatePlan: () -> Unit,
-    onOpenTrip: (String) -> Unit
+    onSearchQueryChange: (String) -> Unit,
+    onSelectSuggestion: (com.guideme.travel.util.PlaceSuggestion) -> Unit,
+    onClearSuggestions: () -> Unit,
+    onOpenGenre: (String, String) -> Unit,
+    onOpenTrip: (String) -> Unit,
+    onLocationPermissionResult: () -> Unit = {}
 ) {
-    var languageExpanded by remember { mutableStateOf(false) }
-    val selectedLanguage = LanguageOptions.supported.firstOrNull { it.code == uiState.languageCode }
-        ?: LanguageOptions.supported.first()
+    val context = LocalContext.current
+    var askedForLocation by remember { mutableStateOf(false) }
+
+    val locationLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { granted ->
+        if (granted.values.any { it }) {
+            onLocationPermissionResult()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (!askedForLocation && !LocationPermissionHelper.hasFineOrCoarseLocation(context)) {
+            askedForLocation = true
+            locationLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
 
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 20.dp),
-        contentPadding = PaddingValues(vertical = 24.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
             Text(
-                text = "Plan your next adventure",
-                style = MaterialTheme.typography.displaySmall
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "Curated attractions, offline maps, and audio guides that start automatically as you arrive.",
-                style = MaterialTheme.typography.bodyLarge,
+                text = if (uiState.countryName.isNotBlank()) {
+                    stringResource(R.string.explore_country, uiState.countryName)
+                } else {
+                    stringResource(R.string.explore_destinations)
+                },
+                style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
         item {
-            GuideMeCard {
-                Text("Create a trip", style = MaterialTheme.typography.titleLarge)
+            Box {
                 OutlinedTextField(
-                    value = uiState.origin,
-                    onValueChange = onOriginChange,
+                    value = uiState.searchQuery,
+                    onValueChange = onSearchQueryChange,
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Starting from") },
-                    singleLine = true
+                    placeholder = { Text(stringResource(R.string.search_hint)) },
+                    leadingIcon = {
+                        if (uiState.isCreatingTrip) {
+                            CircularProgressIndicator(modifier = Modifier.height(20.dp))
+                        } else {
+                            Icon(Icons.Default.Search, contentDescription = null)
+                        }
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp)
                 )
-                OutlinedTextField(
-                    value = uiState.destination,
-                    onValueChange = onDestinationChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Destination") },
-                    singleLine = true
-                )
-                ExposedDropdownMenuBox(
-                    expanded = languageExpanded,
-                    onExpandedChange = { languageExpanded = !languageExpanded }
-                ) {
-                    OutlinedTextField(
-                        value = selectedLanguage.displayName,
-                        onValueChange = {},
-                        readOnly = true,
+                if (uiState.searchSuggestions.isNotEmpty()) {
+                    Card(
                         modifier = Modifier
-                            .menuAnchor()
-                            .fillMaxWidth(),
-                        label = { Text("Guide language") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = languageExpanded) }
-                    )
-                    ExposedDropdownMenu(
-                        expanded = languageExpanded,
-                        onDismissRequest = { languageExpanded = false }
+                            .fillMaxWidth()
+                            .padding(top = 64.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                     ) {
-                        LanguageOptions.supported.forEach { language ->
-                            DropdownMenuItem(
-                                text = { Text(language.displayName) },
-                                onClick = {
-                                    onLanguageChange(language.code)
-                                    languageExpanded = false
-                                }
-                            )
+                        Column {
+                            uiState.searchSuggestions.take(5).forEach { suggestion ->
+                                Text(
+                                    text = suggestion.fullText,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            onSelectSuggestion(suggestion)
+                                            onClearSuggestions()
+                                        }
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
                         }
                     }
                 }
-                if (uiState.errorMessage != null) {
-                    Text(
-                        text = uiState.errorMessage,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-                Button(
-                    onClick = onCreatePlan,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !uiState.isLoading
+            }
+            if (uiState.errorMessage != null) {
+                Text(
+                    text = uiState.errorMessage,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+        }
+
+        item {
+            Text(stringResource(R.string.explore_regions), style = MaterialTheme.typography.titleLarge)
+        }
+
+        if (uiState.isLoadingGenres) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(160.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    if (uiState.isLoading) {
-                        CircularProgressIndicator()
-                    } else {
-                        Text("Create travel plan")
+                    CircularProgressIndicator()
+                }
+            }
+        } else {
+            item {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.height(((uiState.genres.size / 2 + 1) * 168).dp)
+                ) {
+                    items(uiState.genres, key = { it.id }) { genre ->
+                        GenreTile(
+                            genre = genre,
+                            onClick = { onOpenGenre(uiState.countryCode, genre.id) }
+                        )
                     }
                 }
             }
@@ -132,15 +187,71 @@ fun HomeScreen(
 
         if (uiState.recentTrips.isNotEmpty()) {
             item {
-                Text("Recent trips", style = MaterialTheme.typography.headlineMedium)
+                Text(stringResource(R.string.recent_trips), style = MaterialTheme.typography.titleLarge)
             }
-            items(uiState.recentTrips, key = { it.id }) { trip ->
-                GuideMeCard(
-                    modifier = Modifier.clickable { onOpenTrip(trip.id) }
-                ) {
-                    Text("${trip.origin} → ${trip.destination}", style = MaterialTheme.typography.titleLarge)
-                    Text("${trip.attractions.size} attractions • ${trip.status.name.lowercase()}")
+            items(uiState.recentTrips.take(3), key = { it.id }) { trip ->
+                GuideMeCard(modifier = Modifier.clickable { onOpenTrip(trip.id) }) {
+                    Text(trip.destination, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "${trip.attractions.size} stops • ${trip.status.name.lowercase()}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GenreTile(
+    genre: CuratedGenre,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Box {
+            AsyncImage(
+                model = genre.imageUrl,
+                contentDescription = genre.name,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f)),
+                            startY = 80f
+                        )
+                    )
+            )
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .padding(12.dp)
+            ) {
+                Text(
+                    text = genre.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = genre.blurb,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.9f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }

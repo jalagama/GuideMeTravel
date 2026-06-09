@@ -1,5 +1,6 @@
 package com.guideme.travel
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -17,6 +18,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var googleSignInHelper: GoogleSignInHelper
     private var onGoogleToken: (String) -> Unit = {}
     private var onGoogleError: (String) -> Unit = {}
+    private var onEmailLink: (String) -> Unit = {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -33,12 +35,28 @@ class MainActivity : ComponentActivity() {
             val authViewModel: AuthViewModel = hiltViewModel()
             onGoogleToken = { token -> authViewModel.signInWithGoogle(token) { } }
             onGoogleError = { /* surfaced via AuthViewModel on next attempt */ }
+            onEmailLink = { link -> authViewModel.handleEmailLink(link) { } }
 
             GuideMeTheme {
                 GuideMeApp(
                     onGoogleSignIn = { googleSignInHelper.launch() }
                 )
             }
+        }
+
+        handleEmailLinkIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleEmailLinkIntent(intent)
+    }
+
+    private fun handleEmailLinkIntent(intent: Intent?) {
+        val link = intent?.data?.toString() ?: return
+        if (link.contains("finishSignIn") || link.contains("mode=signIn")) {
+            onEmailLink(link)
         }
     }
 }

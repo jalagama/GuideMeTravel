@@ -25,7 +25,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.guideme.travel.R
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -152,6 +154,13 @@ fun TripMapScreen(
         ) {
             item {
                 Text("Live trip map", style = MaterialTheme.typography.headlineMedium)
+                if (uiState.mapMetadata == null) {
+                    Text(
+                        text = stringResource(R.string.online_mode_map_hint),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
                 Text(
                     text = "Guides play automatically when you approach each marker. You can also play manually.",
                     style = MaterialTheme.typography.bodyLarge,

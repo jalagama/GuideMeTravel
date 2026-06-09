@@ -13,10 +13,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.guideme.travel.R
 import com.guideme.travel.ui.components.GuideMeCard
 
 @Composable
@@ -24,28 +27,32 @@ fun AuthScreen(
     uiState: AuthUiState,
     onSignInAnonymously: () -> Unit,
     onSignInWithGoogle: () -> Unit,
-    onSignInWithEmail: () -> Unit,
-    onEmailChange: (String) -> Unit,
-    onPasswordChange: (String) -> Unit,
-    onToggleSignUpMode: () -> Unit
+    onSendSignInLink: () -> Unit,
+    onEmailChange: (String) -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center
+            .padding(horizontal = 24.dp, vertical = 32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("Sign in to GuideMe", style = MaterialTheme.typography.displaySmall)
-        Spacer(modifier = Modifier.height(12.dp))
+        Text("GuideMe", style = MaterialTheme.typography.displayMedium)
         Text(
-            text = "Sign in to sync trips across devices and download AI-generated offline guides.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            text = stringResource(R.string.tagline),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary
         )
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Sign in to explore curated trips, or continue as guest.",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(28.dp))
 
         GuideMeCard {
-            Text("Google account", style = MaterialTheme.typography.titleLarge)
             OutlinedButton(
                 onClick = onSignInWithGoogle,
                 modifier = Modifier.fillMaxWidth(),
@@ -55,60 +62,58 @@ fun AuthScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         GuideMeCard {
-            Text(
-                if (uiState.isSignUpMode) "Create email account" else "Email sign-in",
-                style = MaterialTheme.typography.titleLarge
-            )
             OutlinedTextField(
                 value = uiState.email,
                 onValueChange = onEmailChange,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Email") },
-                singleLine = true
+                placeholder = { Text("you@example.com") },
+                singleLine = true,
+                enabled = !uiState.isLoading
             )
-            OutlinedTextField(
-                value = uiState.password,
-                onValueChange = onPasswordChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Password") },
-                singleLine = true
-            )
-            TextButton(onClick = onToggleSignUpMode) {
+            if (uiState.linkSent) {
                 Text(
-                    if (uiState.isSignUpMode) "Already have an account? Sign in"
-                    else "New here? Create account"
+                    text = stringResource(R.string.email_link_sent),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
-            Button(
-                onClick = onSignInWithEmail,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !uiState.isLoading
-            ) {
-                Text(if (uiState.isSignUpMode) "Create account" else "Sign in with email")
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        GuideMeCard {
-            Text("Quick start", style = MaterialTheme.typography.titleLarge)
-            Text("Anonymous sign-in for trying the app without an account.")
             if (uiState.errorMessage != null) {
                 Text(uiState.errorMessage, color = MaterialTheme.colorScheme.error)
             }
             Button(
-                onClick = onSignInAnonymously,
+                onClick = onSendSignInLink,
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !uiState.isLoading
             ) {
                 if (uiState.isLoading) {
                     CircularProgressIndicator()
                 } else {
-                    Text("Continue as guest")
+                    Text(
+                        if (uiState.linkSent) {
+                            stringResource(R.string.resend_sign_in_link)
+                        } else {
+                            stringResource(R.string.send_sign_in_link)
+                        }
+                    )
                 }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedButton(
+            onClick = onSignInAnonymously,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !uiState.isLoading
+        ) {
+            if (uiState.isLoading) {
+                CircularProgressIndicator()
+            } else {
+                Text(stringResource(R.string.continue_as_guest))
             }
         }
     }

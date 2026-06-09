@@ -38,7 +38,8 @@ class UserRepositoryImpl @Inject constructor(
                         displayName = snapshot.getString("displayName"),
                         email = snapshot.getString("email"),
                         languageCode = snapshot.getString("languageCode") ?: "en",
-                        createdAtMillis = snapshot.getLong("createdAtMillis") ?: 0L
+                        createdAtMillis = snapshot.getLong("createdAtMillis") ?: 0L,
+                        countryCode = snapshot.getString("countryCode")
                     )
                 )
             }
@@ -51,7 +52,8 @@ class UserRepositoryImpl @Inject constructor(
                 "displayName" to profile.displayName,
                 "email" to profile.email,
                 "languageCode" to profile.languageCode,
-                "createdAtMillis" to profile.createdAtMillis
+                "createdAtMillis" to profile.createdAtMillis,
+                "countryCode" to profile.countryCode
             )
         ).await()
     }

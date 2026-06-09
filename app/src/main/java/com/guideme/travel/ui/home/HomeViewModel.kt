@@ -2,12 +2,18 @@ package com.guideme.travel.ui.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.guideme.travel.domain.model.CuratedGenre
 import com.guideme.travel.domain.model.TripPlan
 import com.guideme.travel.domain.usecase.CreateTripUseCase
+import com.guideme.travel.domain.usecase.GetCountryGenresUseCase
 import com.guideme.travel.domain.usecase.ObserveDefaultLanguageUseCase
 import com.guideme.travel.domain.usecase.ObserveTripsUseCase
 import com.guideme.travel.domain.usecase.SetDefaultLanguageUseCase
+import com.guideme.travel.util.PlaceSuggestion
+import com.guideme.travel.util.PlacesAutocompleteHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -18,23 +24,30 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class HomeUiState(
-    val origin: String = "Bangalore",
-    val destination: String = "Hampi",
+    val searchQuery: String = "",
     val languageCode: String = "en",
-    val isLoading: Boolean = false,
+    val countryCode: String = "",
+    val countryName: String = "",
+    val genres: List<CuratedGenre> = emptyList(),
+    val isLoadingGenres: Boolean = true,
+    val isCreatingTrip: Boolean = false,
     val recentTrips: List<TripPlan> = emptyList(),
+    val searchSuggestions: List<PlaceSuggestion> = emptyList(),
     val errorMessage: String? = null
 )
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
+    private val getCountryGenresUseCase: GetCountryGenresUseCase,
     private val createTripUseCase: CreateTripUseCase,
     private val observeTripsUseCase: ObserveTripsUseCase,
     private val observeDefaultLanguageUseCase: ObserveDefaultLanguageUseCase,
-    private val setDefaultLanguageUseCase: SetDefaultLanguageUseCase
+    private val setDefaultLanguageUseCase: SetDefaultLanguageUseCase,
+    private val placesAutocompleteHelper: PlacesAutocompleteHelper
 ) : ViewModel() {
 
     private val formState = MutableStateFlow(HomeUiState())
+    private var searchJob: Job? = null
 
     val uiState: StateFlow<HomeUiState> = combine(
         formState,
@@ -55,44 +68,101 @@ class HomeViewModel @Inject constructor(
         initialValue = HomeUiState()
     )
 
-    fun updateOrigin(value: String) {
-        formState.update { it.copy(origin = value) }
+    init {
+        loadGenres()
     }
 
-    fun updateDestination(value: String) {
-        formState.update { it.copy(destination = value) }
+    fun reloadAfterLocationGranted() {
+        loadGenres()
+    }
+
+    fun loadGenres() {
+        viewModelScope.launch {
+            formState.update { it.copy(isLoadingGenres = true, errorMessage = null) }
+            runCatching { getCountryGenresUseCase() }
+                .onSuccess { result ->
+                    formState.update {
+                        it.copy(
+                            isLoadingGenres = false,
+                            countryCode = result.countryCode,
+                            countryName = result.countryName,
+                            genres = result.genres
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    formState.update {
+                        it.copy(
+                            isLoadingGenres = false,
+                            errorMessage = error.message ?: "Failed to load destinations"
+                        )
+                    }
+                }
+        }
+    }
+
+    fun updateSearchQuery(value: String) {
+        formState.update { it.copy(searchQuery = value, errorMessage = null) }
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            delay(300)
+            runCatching { placesAutocompleteHelper.fetchPredictions(value) }
+                .onSuccess { suggestions ->
+                    formState.update { it.copy(searchSuggestions = suggestions) }
+                }
+        }
+    }
+
+    fun clearSuggestions() {
+        formState.update { it.copy(searchSuggestions = emptyList()) }
+    }
+
+    fun selectDestinationSuggestion(suggestion: PlaceSuggestion, onSuccess: (String) -> Unit) {
+        formState.update {
+            it.copy(
+                searchQuery = suggestion.fullText,
+                searchSuggestions = emptyList()
+            )
+        }
+        createPlanForDestination(suggestion.fullText, onSuccess)
+    }
+
+    fun createPlanFromSearch(onSuccess: (String) -> Unit) {
+        val destination = formState.value.searchQuery.trim()
+        if (destination.isBlank()) {
+            formState.update { it.copy(errorMessage = "Search for a place to plan a trip") }
+            return
+        }
+        createPlanForDestination(destination, onSuccess)
+    }
+
+    private fun createPlanForDestination(destination: String, onSuccess: (String) -> Unit) {
+        viewModelScope.launch {
+            formState.update { it.copy(isCreatingTrip = true, errorMessage = null) }
+            runCatching {
+                createTripUseCase(
+                    origin = "Current location",
+                    destination = destination,
+                    languageCode = formState.value.languageCode
+                )
+            }.onSuccess { trip ->
+                formState.update { it.copy(isCreatingTrip = false, searchQuery = "") }
+                onSuccess(trip.id)
+            }.onFailure { error ->
+                formState.update {
+                    it.copy(
+                        isCreatingTrip = false,
+                        errorMessage = error.message ?: "Failed to create plan"
+                    )
+                }
+            }
+        }
     }
 
     fun updateLanguage(value: String) {
         formState.update { it.copy(languageCode = value) }
         viewModelScope.launch {
             setDefaultLanguageUseCase(value)
-        }
-    }
-
-    fun createPlan(onSuccess: (String) -> Unit) {
-        val current = formState.value
-        if (current.origin.isBlank() || current.destination.isBlank()) {
-            formState.update { it.copy(errorMessage = "Enter origin and destination") }
-            return
-        }
-
-        viewModelScope.launch {
-            formState.update { it.copy(isLoading = true, errorMessage = null) }
-            runCatching {
-                createTripUseCase(
-                    origin = current.origin.trim(),
-                    destination = current.destination.trim(),
-                    languageCode = current.languageCode
-                )
-            }.onSuccess { trip ->
-                formState.update { it.copy(isLoading = false) }
-                onSuccess(trip.id)
-            }.onFailure { error ->
-                formState.update {
-                    it.copy(isLoading = false, errorMessage = error.message ?: "Failed to create plan")
-                }
-            }
         }
     }
 }

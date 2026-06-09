@@ -17,8 +17,6 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import kotlin.math.max
-import kotlin.math.min
 
 data class OfflineMapMetadata(
     val regionId: Long,
@@ -55,15 +53,12 @@ class MapLibreOfflineMapManager @Inject constructor(
         }
 
         val style = styleUrl()
-        val lats = attractions.map { it.latitude }
-        val lngs = attractions.map { it.longitude }
         val padding = 0.05
-        val bounds = LatLngBounds.from(
-            min(lats.min(), lats.max()) - padding,
-            min(lngs.min(), lngs.max()) - padding,
-            max(lats.min(), lats.max()) + padding,
-            max(lngs.min(), lngs.max()) + padding
-        )
+        val latSouth = attractions.minOf { it.latitude } - padding
+        val latNorth = attractions.maxOf { it.latitude } + padding
+        val lonWest = attractions.minOf { it.longitude } - padding
+        val lonEast = attractions.maxOf { it.longitude } + padding
+        val bounds = LatLngBounds.from(latNorth, lonEast, latSouth, lonWest)
 
         val definition = OfflineTilePyramidRegionDefinition(
             style,

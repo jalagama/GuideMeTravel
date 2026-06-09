@@ -6,9 +6,10 @@ import {
   AttractionDoc,
   assignDays,
   countryNameFromCode,
+  CURATED_SCHEMA_VERSION,
   dedupeNearbySpots,
   extractJsonArray,
-  fetchPlacesAttractions,
+  fetchPlacesAttractionsInCountry,
   optimizeRoute,
   passesQualityGate,
   qualityScore,
@@ -64,7 +65,7 @@ export async function getCountryGenres(countryCode: string) {
   const normalized = countryCode.trim().toUpperCase();
   const cacheRef = db.collection("curatedGenres").doc(normalized);
   const cached = await cacheRef.get();
-  if (cached.exists) {
+  if (cached.exists && (cached.data()?.schemaVersion ?? 1) >= CURATED_SCHEMA_VERSION) {
     return cached.data();
   }
 
@@ -74,6 +75,7 @@ export async function getCountryGenres(countryCode: string) {
     countryCode: normalized,
     countryName,
     genres,
+    schemaVersion: CURATED_SCHEMA_VERSION,
     updatedAtMillis: Date.now(),
   };
   await cacheRef.set(doc);
@@ -86,7 +88,7 @@ export async function getGenrePackages(countryCode: string, genreId: string) {
   const cacheId = `${normalized}_${genreId}`;
   const cacheRef = db.collection("curatedPackages").doc(cacheId);
   const cached = await cacheRef.get();
-  if (cached.exists) {
+  if (cached.exists && (cached.data()?.schemaVersion ?? 1) >= CURATED_SCHEMA_VERSION) {
     return cached.data();
   }
 
@@ -106,6 +108,7 @@ export async function getGenrePackages(countryCode: string, genreId: string) {
     genreId,
     genreName: genre.name,
     packages,
+    schemaVersion: CURATED_SCHEMA_VERSION,
     updatedAtMillis: Date.now(),
   };
   await cacheRef.set(doc);
@@ -228,12 +231,14 @@ async function generateGenresWithGemini(countryName: string, countryCode: string
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
   const prompt = `
-You are a travel curator for ${countryName}.
-Return JSON only with this shape:
-{ "genres": [ { "id": "beaches-goa", "name": "Beaches", "type": "beach", "blurb": "short sentence", "imageSearchHint": "Goa beach India" } ] }
+You are an AI travel curator for ${countryName} (ISO country code: ${countryCode}).
+Return JSON only:
+{ "genres": [ { "id": "historical-heritage", "name": "Historical & Heritage Destinations", "type": "heritage", "blurb": "short sentence", "imageSearchHint": "heritage landmark ${countryName}" } ] }
 Rules:
-- Return 10 to 12 genres/regions covering beaches, mountains, monuments, ghats, wildlife, heritage, etc.
-- Use only real regions/attraction types in ${countryName}.
+- Return 10 to 12 top tourist experience categories for ${countryName} only.
+- Names should read like travel themes, e.g. "Hill Stations & Mountains", "Beaches & Coastal Getaways", "Wildlife & National Parks".
+- Cover the most popular tourist regions and experiences within ${countryName}.
+- NEVER include categories for other countries.
 - id must be lowercase slug.
 - No fabricated places.
 `;
@@ -275,15 +280,17 @@ async function generatePackagesWithGemini(
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
   const prompt = `
-You are a travel planner for ${countryName}.
-Create curated tour packages for the genre "${genre.name}" (${genre.type}).
+You are an AI travel curator for ${countryName} (ISO country code: ${countryCode}).
+List iconic tourist destinations for the category "${genre.name}" (${genre.type}).
 Return JSON only:
-{ "packages": [ { "id": "goa-beach-3d", "title": "Goa Beach Escape", "region": "Goa", "days": 3, "shortInfo": "one line", "imageSearchHint": "Goa beach sunset" } ] }
+{ "packages": [ { "id": "in-taj-mahal", "title": "Taj Mahal", "region": "Agra, Uttar Pradesh", "days": 2, "shortInfo": "UNESCO marble mausoleum", "imageSearchHint": "Taj Mahal Agra ${countryName}" } ] }
 Rules:
-- Return 6 to 10 realistic packages.
-- days between 1 and 7.
-- Use only real regions in ${countryName}.
-- id must be unique lowercase slug including country code prefix "${countryCode.toLowerCase()}-".
+- Return 6 to 10 famous real places or cities ONLY inside ${countryName}.
+- title = destination name (e.g. Taj Mahal, Jaipur, Hampi, Khajuraho Group of Monuments).
+- region = city/state within ${countryName}.
+- days = suggested visit length between 1 and 5.
+- NEVER include destinations outside ${countryName}.
+- id must be unique lowercase slug with prefix "${countryCode.toLowerCase()}-".
 - No fabricated places.
 `;
 
@@ -299,28 +306,14 @@ Rules:
         const id = pkg.id?.startsWith(countryCode.toLowerCase())
           ? pkg.id
           : `${countryCode.toLowerCase()}-${pkg.id || slugify(pkg.title)}`;
-        const detailRef = db.collection("tourPackages").doc(id);
-        if (!(await detailRef.get()).exists) {
-          const summary = {
-            id,
-            title: pkg.title,
-            region: pkg.region,
-            days: Math.max(1, Math.min(7, pkg.days || 3)),
-            heroImageUrl: "",
-            shortInfo: pkg.shortInfo || pkg.title,
-          };
-          summary.heroImageUrl = mapsKey
-            ? await resolveGenreImage(`${pkg.region} ${countryName}`, mapsKey)
-            : fallbackGenreImage(index);
-          await ensureTourPackageDetail(countryCode, genre.id, summary);
-        }
+        const imageQuery = `${pkg.title} ${pkg.region} ${countryName}`;
         return {
           id,
           title: pkg.title,
           region: pkg.region,
-          days: Math.max(1, Math.min(7, pkg.days || 3)),
+          days: Math.max(1, Math.min(5, pkg.days || 2)),
           heroImageUrl: mapsKey
-            ? await resolveGenreImage(`${pkg.region} ${countryName}`, mapsKey)
+            ? await resolveGenreImage(imageQuery, mapsKey)
             : fallbackGenreImage(index),
           shortInfo: pkg.shortInfo || pkg.title,
         };
@@ -388,11 +381,7 @@ async function buildFallbackPackages(
   countryCode: string,
   genre: GenreDoc
 ): Promise<PackageSummaryDoc[]> {
-  const packages = fallbackPackageSummaries(countryCode, genre);
-  await Promise.all(
-    packages.map((summary) => ensureTourPackageDetail(countryCode, genre.id, summary))
-  );
-  return packages;
+  return fallbackPackageSummaries(countryCode, genre);
 }
 
 async function generateTourPackageDetail(
@@ -404,9 +393,10 @@ async function generateTourPackageDetail(
   const days = summary.days;
   const targetCount = targetSpotCount(days);
 
-  let candidates = await fetchPlacesAttractions(`${summary.region}, ${countryName}`, 40);
+  const destinationQuery = `${summary.title}, ${summary.region}, ${countryName}`;
+  let candidates = await fetchPlacesAttractionsInCountry(destinationQuery, countryCode, 40);
   if (candidates.length < 3) {
-    candidates = await fetchGeminiSpots(`${summary.region}, ${countryName}`, targetCount);
+    candidates = await fetchGeminiSpots(destinationQuery, countryName, countryCode, targetCount);
   }
 
   let curated = dedupeNearbySpots(
@@ -462,16 +452,22 @@ async function generateTourPackageDetail(
   };
 }
 
-async function fetchGeminiSpots(destination: string, maxResults: number): Promise<AttractionDoc[]> {
+async function fetchGeminiSpots(
+  destination: string,
+  countryName: string,
+  countryCode: string,
+  maxResults: number
+): Promise<AttractionDoc[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return [];
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
   const prompt = `
-Return JSON array only for major real tourist attractions near ${destination}.
+Return JSON array only for major real tourist attractions near ${destination} in ${countryName}.
 Each item: id, name, description, latitude, longitude, estimatedMinutes, rating, userRatingsTotal.
-Use only real places. Max ${maxResults} items. No fabrication.
+Use only real places located inside ${countryName} (${countryCode}). Max ${maxResults} items. No fabrication.
+Never include attractions outside ${countryName}.
 `;
 
   try {
@@ -535,7 +531,7 @@ async function generatePackageExtras(
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
   const prompt = `
-You are curating a ${summary.days}-day tour: "${summary.title}" in ${summary.region}, ${countryName}.
+You are curating a ${summary.days}-day trip plan for the destination "${summary.title}" in ${summary.region}, ${countryName}.
 Spots: ${spotNames}
 Return JSON only:
 {
@@ -590,39 +586,173 @@ function fallbackGenreImage(index: number): string {
 function fallbackGenres(countryCode: string): GenreDoc[] {
   if (countryCode === "IN") {
     return [
-      { id: "beaches", name: "Beaches", type: "beach", blurb: "Coastal getaways", imageUrl: fallbackGenreImage(0) },
-      { id: "mountains", name: "Mountains", type: "mountain", blurb: "Hill stations & peaks", imageUrl: fallbackGenreImage(1) },
-      { id: "monuments", name: "Monuments", type: "monument", blurb: "Historic landmarks", imageUrl: fallbackGenreImage(2) },
-      { id: "ghats", name: "Ghats", type: "spiritual", blurb: "Riverside ghats", imageUrl: fallbackGenreImage(3) },
-      { id: "wildlife", name: "Wildlife", type: "wildlife", blurb: "National parks", imageUrl: fallbackGenreImage(0) },
-      { id: "heritage", name: "Heritage", type: "heritage", blurb: "UNESCO & forts", imageUrl: fallbackGenreImage(1) },
+      {
+        id: "historical-heritage",
+        name: "Historical & Heritage Destinations",
+        type: "heritage",
+        blurb: "Forts, palaces & UNESCO sites",
+        imageUrl: fallbackGenreImage(0),
+      },
+      {
+        id: "hill-stations",
+        name: "Hill Stations & Mountains",
+        type: "mountain",
+        blurb: "Cool retreats & scenic peaks",
+        imageUrl: fallbackGenreImage(1),
+      },
+      {
+        id: "beaches-coastal",
+        name: "Beaches & Coastal Getaways",
+        type: "beach",
+        blurb: "Sun, sand & seaside towns",
+        imageUrl: fallbackGenreImage(2),
+      },
+      {
+        id: "spiritual-ghats",
+        name: "Spiritual & Ghats",
+        type: "spiritual",
+        blurb: "Temples & riverside ghats",
+        imageUrl: fallbackGenreImage(3),
+      },
+      {
+        id: "wildlife-parks",
+        name: "Wildlife & National Parks",
+        type: "wildlife",
+        blurb: "Safaris & nature reserves",
+        imageUrl: fallbackGenreImage(0),
+      },
+      {
+        id: "food-culture",
+        name: "Food & Cultural Cities",
+        type: "culture",
+        blurb: "Markets, cuisine & festivals",
+        imageUrl: fallbackGenreImage(1),
+      },
     ];
   }
   return [
-    { id: "landmarks", name: "Landmarks", type: "monument", blurb: "Iconic sights", imageUrl: fallbackGenreImage(0) },
-    { id: "nature", name: "Nature", type: "nature", blurb: "Parks & outdoors", imageUrl: fallbackGenreImage(1) },
-    { id: "culture", name: "Culture", type: "culture", blurb: "Museums & heritage", imageUrl: fallbackGenreImage(2) },
+    { id: "landmarks", name: "Iconic Landmarks", type: "monument", blurb: "Must-see sights", imageUrl: fallbackGenreImage(0) },
+    { id: "nature", name: "Nature & Outdoors", type: "nature", blurb: "Parks & scenic escapes", imageUrl: fallbackGenreImage(1) },
+    { id: "culture", name: "Culture & Heritage", type: "culture", blurb: "Museums & historic quarters", imageUrl: fallbackGenreImage(2) },
   ];
 }
 
 function fallbackPackageSummaries(countryCode: string, genre: GenreDoc): PackageSummaryDoc[] {
   const prefix = countryCode.toLowerCase();
+  const destinationsByGenre: Record<string, PackageSummaryDoc[]> = {
+    "historical-heritage": [
+      {
+        id: `${prefix}-taj-mahal`,
+        title: "Taj Mahal",
+        region: "Agra, Uttar Pradesh",
+        days: 2,
+        heroImageUrl: fallbackGenreImage(0),
+        shortInfo: "Iconic Mughal marble mausoleum",
+      },
+      {
+        id: `${prefix}-jaipur`,
+        title: "Jaipur",
+        region: "Rajasthan",
+        days: 3,
+        heroImageUrl: fallbackGenreImage(1),
+        shortInfo: "Pink City forts and palaces",
+      },
+      {
+        id: `${prefix}-hampi`,
+        title: "Hampi",
+        region: "Karnataka",
+        days: 3,
+        heroImageUrl: fallbackGenreImage(2),
+        shortInfo: "UNESCO Vijayanagara ruins",
+      },
+      {
+        id: `${prefix}-khajuraho`,
+        title: "Khajuraho Group of Monuments",
+        region: "Madhya Pradesh",
+        days: 2,
+        heroImageUrl: fallbackGenreImage(3),
+        shortInfo: "Medieval temple architecture",
+      },
+    ],
+    "hill-stations": [
+      {
+        id: `${prefix}-manali`,
+        title: "Manali",
+        region: "Himachal Pradesh",
+        days: 4,
+        heroImageUrl: fallbackGenreImage(0),
+        shortInfo: "Snow peaks and adventure hub",
+      },
+      {
+        id: `${prefix}-shimla`,
+        title: "Shimla",
+        region: "Himachal Pradesh",
+        days: 3,
+        heroImageUrl: fallbackGenreImage(1),
+        shortInfo: "Colonial hill town charm",
+      },
+      {
+        id: `${prefix}-munnar`,
+        title: "Munnar",
+        region: "Kerala",
+        days: 3,
+        heroImageUrl: fallbackGenreImage(2),
+        shortInfo: "Tea plantations and misty hills",
+      },
+      {
+        id: `${prefix}-darjeeling`,
+        title: "Darjeeling",
+        region: "West Bengal",
+        days: 3,
+        heroImageUrl: fallbackGenreImage(3),
+        shortInfo: "Toy train and Himalayan views",
+      },
+    ],
+    "beaches-coastal": [
+      {
+        id: `${prefix}-goa`,
+        title: "Goa",
+        region: "Goa",
+        days: 4,
+        heroImageUrl: fallbackGenreImage(0),
+        shortInfo: "Beaches, churches and nightlife",
+      },
+      {
+        id: `${prefix}-andaman`,
+        title: "Andaman Islands",
+        region: "Andaman & Nicobar",
+        days: 5,
+        heroImageUrl: fallbackGenreImage(1),
+        shortInfo: "Turquoise waters and coral reefs",
+      },
+      {
+        id: `${prefix}-gokarna`,
+        title: "Gokarna",
+        region: "Karnataka",
+        days: 3,
+        heroImageUrl: fallbackGenreImage(2),
+        shortInfo: "Quiet beaches and coastal temples",
+      },
+    ],
+  };
+
+  const matched =
+    destinationsByGenre[genre.id] ??
+    destinationsByGenre[slugify(genre.name)] ??
+    [];
+
+  if (matched.length > 0) {
+    return matched;
+  }
+
   return [
     {
-      id: `${prefix}-${genre.id}-classic-3d`,
-      title: `${genre.name} Classic`,
-      region: genre.name,
-      days: 3,
+      id: `${prefix}-${genre.id}-${slugify(genre.name)}-1`,
+      title: `${genre.name} highlight`,
+      region: countryNameFromCode(countryCode),
+      days: 2,
       heroImageUrl: fallbackGenreImage(0),
-      shortInfo: `A curated ${genre.name.toLowerCase()} experience`,
-    },
-    {
-      id: `${prefix}-${genre.id}-explorer-5d`,
-      title: `${genre.name} Explorer`,
-      region: genre.name,
-      days: 5,
-      heroImageUrl: fallbackGenreImage(1),
-      shortInfo: `Extended ${genre.name.toLowerCase()} route`,
+      shortInfo: `Top pick for ${genre.name.toLowerCase()}`,
     },
   ];
 }

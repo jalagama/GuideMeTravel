@@ -33,14 +33,24 @@ class PlacesAutocompleteHelper @Inject constructor(
         }
     }
 
-    suspend fun fetchPredictions(query: String): List<PlaceSuggestion> {
+    suspend fun fetchPredictions(
+        query: String,
+        countryCode: String? = null
+    ): List<PlaceSuggestion> {
         if (query.length < 2) return emptyList()
         val client = placesClient ?: return emptyList()
 
-        val request = FindAutocompletePredictionsRequest.builder()
+        val requestBuilder = FindAutocompletePredictionsRequest.builder()
             .setSessionToken(sessionToken)
             .setQuery(query)
-            .build()
+
+        countryCode
+            ?.trim()
+            ?.uppercase()
+            ?.takeIf { it.length == 2 }
+            ?.let { requestBuilder.setCountries(listOf(it)) }
+
+        val request = requestBuilder.build()
 
         return suspendCancellableCoroutine { continuation ->
             client.findAutocompletePredictions(request)

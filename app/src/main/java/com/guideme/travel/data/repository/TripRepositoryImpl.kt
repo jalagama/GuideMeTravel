@@ -15,6 +15,7 @@ import com.guideme.travel.domain.model.TripStatus
 import com.guideme.travel.domain.repository.AuthRepository
 import com.guideme.travel.domain.repository.PreferencesRepository
 import com.guideme.travel.domain.repository.TripRepository
+import com.guideme.travel.domain.usecase.GetUserCountryUseCase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -36,6 +37,7 @@ class TripRepositoryImpl @Inject constructor(
     private val remoteDataSource: FirebaseTripRemoteDataSource,
     private val offlinePackManager: OfflinePackManager,
     private val preferencesRepository: PreferencesRepository,
+    private val getUserCountryUseCase: GetUserCountryUseCase,
     private val firestore: FirebaseFirestore
 ) : TripRepository {
 
@@ -75,10 +77,13 @@ class TripRepositoryImpl @Inject constructor(
             "Unsupported language code: $languageCode"
         }
 
+        val countryCode = preferencesRepository.countryCode.first()
+            ?: getUserCountryUseCase().also { preferencesRepository.setCountryCode(it) }
+
         val useFirebase = preferencesRepository.useFirebaseBackend.first()
         val trip = if (useFirebase) {
             authRepository.ensureSignedIn()
-            remoteDataSource.generateItinerary(origin, destination, languageCode)
+            remoteDataSource.generateItinerary(origin, destination, languageCode, countryCode)
         } else {
             error("Firebase backend is required for global trip planning.")
         }

@@ -18,6 +18,13 @@ export type AttractionDoc = {
 };
 
 export const PLACES_RADIUS_METERS = 50000;
+export const CURATED_SCHEMA_VERSION = 2;
+
+type GeocodeLocation = {
+  lat: number;
+  lng: number;
+  formattedAddress?: string;
+};
 
 export function slugify(value: string): string {
   return value
@@ -59,35 +66,124 @@ export function countryNameFromCode(countryCode: string): string {
   return names[countryCode.toUpperCase()] ?? countryCode;
 }
 
-export async function geocodeDestination(destination: string): Promise<{
-  lat: number;
-  lng: number;
-  formattedAddress?: string;
-}> {
+export function countryCodeFromGeocodeResult(result: {
+  address_components?: Array<{ short_name: string; types?: string[] }>;
+}): string | null {
+  const country = result.address_components?.find((component) =>
+    component.types?.includes("country")
+  );
+  return country?.short_name?.toUpperCase() ?? null;
+}
+
+async function geocodeDestinationRaw(
+  destination: string,
+  countryCode?: string
+): Promise<GeocodeLocation> {
   const mapsKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!mapsKey) {
     throw new HttpsError("failed-precondition", "Google Maps API key is not configured.");
   }
 
-  const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(destination)}&key=${mapsKey}`;
+  const countryComponent = countryCode
+    ? `&components=country:${countryCode.trim().toUpperCase()}`
+    : "";
+  const geocodeUrl =
+    `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(destination)}` +
+    `${countryComponent}&key=${mapsKey}`;
   const geocodeRes = await fetchWithTimeout(geocodeUrl);
   const geocodeData = await geocodeRes.json();
 
   if (geocodeData.status !== "OK" || !geocodeData.results?.[0]?.geometry?.location) {
     logEvent("geocode_failed", {
       destination,
+      countryCode,
       status: geocodeData.status,
       errorMessage: geocodeData.error_message,
     });
     throw new HttpsError("not-found", `Could not geocode "${destination}".`);
   }
 
-  const location = geocodeData.results[0].geometry.location;
+  const result = geocodeData.results[0];
+  const location = result.geometry.location;
   return {
     lat: location.lat,
     lng: location.lng,
-    formattedAddress: geocodeData.results[0].formatted_address,
+    formattedAddress: result.formatted_address,
   };
+}
+
+export async function geocodeDestination(destination: string): Promise<GeocodeLocation> {
+  return geocodeDestinationRaw(destination);
+}
+
+export async function geocodeDestinationInCountry(
+  destination: string,
+  countryCode: string
+): Promise<GeocodeLocation> {
+  const normalizedCountry = countryCode.trim().toUpperCase();
+  const countryName = countryNameFromCode(normalizedCountry);
+  const queries = [
+    destination,
+    `${destination}, ${countryName}`,
+  ];
+
+  for (const query of queries) {
+    try {
+      const location = await geocodeDestinationRaw(query, normalizedCountry);
+      const verified = await coordinatesAreInCountry(
+        location.lat,
+        location.lng,
+        normalizedCountry
+      );
+      if (verified) {
+        return location;
+      }
+    } catch {
+      // Try the next query variant.
+    }
+  }
+
+  throw new HttpsError(
+    "not-found",
+    `"${destination}" is outside ${countryName}. Search only within your current country.`
+  );
+}
+
+export async function coordinatesAreInCountry(
+  lat: number,
+  lng: number,
+  countryCode: string
+): Promise<boolean> {
+  const mapsKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!mapsKey) return true;
+
+  const reverseUrl =
+    `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&result_type=country&key=${mapsKey}`;
+  const reverseRes = await fetchWithTimeout(reverseUrl);
+  const reverseData = await reverseRes.json();
+  const resolvedCountry = countryCodeFromGeocodeResult(reverseData.results?.[0] ?? {});
+  return resolvedCountry === countryCode.trim().toUpperCase();
+}
+
+async function mapPlacesResults(
+  places: any[],
+  maxResults: number,
+  mapsKey: string
+): Promise<AttractionDoc[]> {
+  return places.slice(0, maxResults).map((place: any, index: number) => ({
+    id: place.place_id,
+    name: place.name,
+    description: place.vicinity ?? "Popular tourist attraction",
+    latitude: place.geometry.location.lat,
+    longitude: place.geometry.location.lng,
+    orderIndex: index,
+    estimatedMinutes: 45,
+    rating: place.rating,
+    userRatingsTotal: place.user_ratings_total,
+    imageUrl: place.photos?.[0]
+      ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=640&photo_reference=${place.photos[0].photo_reference}&key=${mapsKey}`
+      : undefined,
+  }));
 }
 
 export async function fetchPlacesAttractions(
@@ -113,20 +209,48 @@ export async function fetchPlacesAttractions(
     return [];
   }
 
-  return (placesData.results ?? []).slice(0, maxResults).map((place: any, index: number) => ({
-    id: place.place_id,
-    name: place.name,
-    description: place.vicinity ?? "Popular tourist attraction",
-    latitude: place.geometry.location.lat,
-    longitude: place.geometry.location.lng,
-    orderIndex: index,
-    estimatedMinutes: 45,
-    rating: place.rating,
-    userRatingsTotal: place.user_ratings_total,
-    imageUrl: place.photos?.[0]
-      ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=640&photo_reference=${place.photos[0].photo_reference}&key=${mapsKey}`
-      : undefined,
-  }));
+  return mapPlacesResults(placesData.results ?? [], maxResults, mapsKey);
+}
+
+export async function fetchPlacesAttractionsInCountry(
+  destination: string,
+  countryCode: string,
+  maxResults = 25
+): Promise<AttractionDoc[]> {
+  const mapsKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!mapsKey) {
+    throw new HttpsError("failed-precondition", "Google Maps API key is not configured.");
+  }
+
+  const location = await geocodeDestinationInCountry(destination, countryCode);
+  const placesUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${location.lat},${location.lng}&radius=${PLACES_RADIUS_METERS}&type=tourist_attraction&key=${mapsKey}`;
+  const placesRes = await fetchWithTimeout(placesUrl);
+  const placesData = await placesRes.json();
+
+  if (placesData.status !== "OK" && placesData.status !== "ZERO_RESULTS") {
+    logEvent("places_api_failed", {
+      destination,
+      countryCode,
+      status: placesData.status,
+      errorMessage: placesData.error_message,
+    });
+    return [];
+  }
+
+  const mapped = await mapPlacesResults(placesData.results ?? [], maxResults * 2, mapsKey);
+  const filtered: AttractionDoc[] = [];
+  for (const spot of mapped) {
+    const inCountry = await coordinatesAreInCountry(
+      spot.latitude,
+      spot.longitude,
+      countryCode
+    );
+    if (inCountry) {
+      filtered.push({ ...spot, orderIndex: filtered.length });
+    }
+    if (filtered.length >= maxResults) break;
+  }
+  return filtered;
 }
 
 export async function optimizeRoute(attractions: AttractionDoc[]): Promise<AttractionDoc[]> {

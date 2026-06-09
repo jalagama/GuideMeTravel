@@ -153,7 +153,18 @@ fun HomeScreen(
         }
 
         item {
-            Text(stringResource(R.string.explore_regions), style = MaterialTheme.typography.titleLarge)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(stringResource(R.string.explore_regions), style = MaterialTheme.typography.titleLarge)
+                Text(
+                    text = if (uiState.countryName.isNotBlank()) {
+                        stringResource(R.string.explore_regions_subtitle, uiState.countryName)
+                    } else {
+                        stringResource(R.string.explore_regions_subtitle_generic)
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
 
         if (uiState.isLoadingGenres) {

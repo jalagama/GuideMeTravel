@@ -37,9 +37,13 @@ export const generateItinerary = onCall(
     const origin = String(request.data.origin ?? "").trim();
     const destination = String(request.data.destination ?? "").trim();
     const languageCode = validateLanguageCode(String(request.data.languageCode ?? "en"));
+    const countryCode = String(request.data.countryCode ?? "").trim().toUpperCase();
 
     if (!origin || !destination) {
       throw new HttpsError("invalid-argument", "Origin and destination are required.");
+    }
+    if (!countryCode) {
+      throw new HttpsError("invalid-argument", "countryCode is required.");
     }
 
     await enforceRateLimit({
@@ -54,6 +58,7 @@ export const generateItinerary = onCall(
         origin,
         destination,
         languageCode,
+        countryCode,
       });
     } catch (error) {
       logEvent("generate_itinerary_failed", {

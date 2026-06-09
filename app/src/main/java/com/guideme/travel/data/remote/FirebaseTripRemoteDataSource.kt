@@ -32,7 +32,8 @@ class FirebaseTripRemoteDataSource @Inject constructor(
     suspend fun generateItinerary(
         origin: String,
         destination: String,
-        languageCode: String
+        languageCode: String,
+        countryCode: String
     ): TripPlan {
         authRepository.ensureSignedIn()
         val uid = firebaseAuth.currentUser?.uid
@@ -50,7 +51,8 @@ class FirebaseTripRemoteDataSource @Inject constructor(
                     mapOf(
                         "origin" to origin,
                         "destination" to destination,
-                        "languageCode" to languageCode
+                        "languageCode" to languageCode,
+                        "countryCode" to countryCode
                     )
                 )
                 .await()

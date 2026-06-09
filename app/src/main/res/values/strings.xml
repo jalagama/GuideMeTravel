@@ -2,9 +2,13 @@
 <resources>
     <string name="app_name">GuideMe</string>
     <string name="tagline">Your AI travel companion</string>
-    <string name="search_hint">Search tours or places</string>
+    <string name="search_hint">Search places in your country</string>
     <string name="from_hint">Starting from</string>
     <string name="explore_regions">Top regions</string>
+    <string name="explore_regions_subtitle">Popular tourist regions and travel experiences in %1$s</string>
+    <string name="explore_regions_subtitle_generic">Popular tourist regions and travel experiences near you</string>
+    <string name="curated_destinations_subtitle">AI-curated iconic destinations — tap for trip plans</string>
+    <string name="suggested_days">Suggested %1$d-day trip</string>
     <string name="plan_custom_trip">Plan a custom trip</string>
     <string name="tour_packages">Tour packages</string>
     <string name="route_map">Route map</string>

@@ -53,7 +53,7 @@ class GenreDetailViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        errorMessage = error.message ?: "Failed to load packages"
+                        errorMessage = error.message ?: "Failed to load destinations"
                     )
                 }
             }

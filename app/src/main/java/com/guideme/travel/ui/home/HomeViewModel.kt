@@ -106,7 +106,12 @@ class HomeViewModel @Inject constructor(
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             delay(300)
-            runCatching { placesAutocompleteHelper.fetchPredictions(value) }
+            runCatching {
+                placesAutocompleteHelper.fetchPredictions(
+                    query = value,
+                    countryCode = formState.value.countryCode
+                )
+            }
                 .onSuccess { suggestions ->
                     formState.update { it.copy(searchSuggestions = suggestions) }
                 }

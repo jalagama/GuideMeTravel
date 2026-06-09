@@ -92,25 +92,12 @@ async function generateGuideForAttraction(
     .get();
 
   if (cached.exists) {
-    const data = cached.data()!;
-    const storagePath = String(data.storagePath ?? "");
-    if (!storagePath) {
-      throw new HttpsError(
-        "failed-precondition",
-        `Cached guide for ${attraction.id} is missing storagePath`
-      );
-    }
-    return {
-      attractionId: attraction.id,
-      url: await createSignedUrl(storagePath),
-      storagePath,
-      transcript: data.transcript,
-    };
+    return resolveCachedGuide(attraction.id, cached.data()!);
   }
 
   const { transcript, source } = await resolveGuideTranscript(attraction, languageCode);
   const storagePath = `guide-audio/${attraction.id}/${languageCode}/guide.mp3`;
-  await synthesizeAndUpload(storagePath, languageCode, transcript);
+  const audio = await trySynthesizeAndUpload(storagePath, languageCode, transcript);
 
   await db
     .collection("attractions")
@@ -119,13 +106,37 @@ async function generateGuideForAttraction(
     .doc(languageCode)
     .set({
       transcript,
-      storagePath,
+      storagePath: audio.storagePath || null,
+      audioAvailable: audio.audioAvailable,
       updatedAtMillis: Date.now(),
       source,
     });
 
   return {
     attractionId: attraction.id,
+    url: audio.url,
+    storagePath: audio.storagePath,
+    transcript,
+  };
+}
+
+async function resolveCachedGuide(
+  attractionId: string,
+  data: FirebaseFirestore.DocumentData
+): Promise<AudioFileResult> {
+  const transcript = String(data.transcript ?? "");
+  const storagePath = String(data.storagePath ?? "");
+  if (!storagePath) {
+    return {
+      attractionId,
+      url: "",
+      storagePath: "",
+      transcript,
+    };
+  }
+
+  return {
+    attractionId,
     url: await createSignedUrl(storagePath),
     storagePath,
     transcript,
@@ -178,11 +189,45 @@ Keep it conversational and factual. Do not invent details.
   }
 
   if (languageCode !== "en") {
-    const [translation] = await translateClient.translate(script, languageCode);
-    script = translation;
+    try {
+      const [translation] = await translateClient.translate(script, languageCode);
+      script = translation;
+    } catch (error) {
+      logEvent("translate_failed", {
+        attraction: attraction.name,
+        languageCode,
+        error: error instanceof Error ? error.message : "unknown",
+      });
+    }
   }
 
   return { script, source };
+}
+
+async function trySynthesizeAndUpload(
+  storagePath: string,
+  languageCode: SupportedLanguageCode,
+  transcript: string
+): Promise<{ url: string; storagePath: string; audioAvailable: boolean }> {
+  try {
+    await synthesizeAndUpload(storagePath, languageCode, transcript);
+    return {
+      url: await createSignedUrl(storagePath),
+      storagePath,
+      audioAvailable: true,
+    };
+  } catch (error) {
+    logEvent("tts_synthesis_failed", {
+      storagePath,
+      languageCode,
+      error: error instanceof Error ? error.message : "unknown",
+    });
+    return {
+      url: "",
+      storagePath: "",
+      audioAvailable: false,
+    };
+  }
 }
 
 async function synthesizeAndUpload(

@@ -30,6 +30,7 @@ type Attraction = {
   longitude: number;
   orderIndex: number;
   estimatedMinutes: number;
+  transcript?: string;
 };
 
 type AudioFileResult = {
@@ -107,7 +108,7 @@ async function generateGuideForAttraction(
     };
   }
 
-  const transcript = await buildGuideScript(attraction, languageCode);
+  const { transcript, source } = await resolveGuideTranscript(attraction, languageCode);
   const storagePath = `guide-audio/${attraction.id}/${languageCode}/guide.mp3`;
   await synthesizeAndUpload(storagePath, languageCode, transcript);
 
@@ -120,7 +121,7 @@ async function generateGuideForAttraction(
       transcript,
       storagePath,
       updatedAtMillis: Date.now(),
-      source: "gemini+wikipedia",
+      source,
     });
 
   return {
@@ -131,27 +132,49 @@ async function generateGuideForAttraction(
   };
 }
 
+async function resolveGuideTranscript(
+  attraction: Attraction,
+  languageCode: SupportedLanguageCode
+): Promise<{ transcript: string; source: string }> {
+  const existing = attraction.transcript?.trim();
+  if (existing) {
+    return { transcript: existing, source: "itinerary" };
+  }
+
+  const { script, source } = await buildGuideScript(attraction, languageCode);
+  return { transcript: script, source };
+}
+
 async function buildGuideScript(
   attraction: Attraction,
   languageCode: SupportedLanguageCode
-): Promise<string> {
+): Promise<{ script: string; source: string }> {
   const wikiFacts = await fetchWikipediaSummary(attraction.name, languageCode);
   const groundedFacts = wikiFacts || `${attraction.name}. ${attraction.description}`;
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
 
   let script = `Welcome to ${attraction.name}. ${groundedFacts}`;
+  let source = "wikipedia";
 
   if (apiKey) {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-    const prompt = `
+    try {
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+      const prompt = `
 Write a 90-second engaging audio guide script for a tourist arriving at ${attraction.name}.
 Use only these facts:
 ${groundedFacts}
 Keep it conversational and factual. Do not invent details.
 `;
-    const result = await model.generateContent(prompt);
-    script = result.response.text().trim();
+      const result = await model.generateContent(prompt);
+      script = result.response.text().trim();
+      source = "gemini+wikipedia";
+    } catch (error) {
+      logEvent("gemini_script_failed", {
+        attraction: attraction.name,
+        error: error instanceof Error ? error.message : "unknown",
+      });
+    }
   }
 
   if (languageCode !== "en") {
@@ -159,7 +182,7 @@ Keep it conversational and factual. Do not invent details.
     script = translation;
   }
 
-  return script;
+  return { script, source };
 }
 
 async function synthesizeAndUpload(

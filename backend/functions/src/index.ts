@@ -171,7 +171,7 @@ export const getGenrePackages = onCall(
 export const getTourPackageDetail = onCall(
   {
     region: "asia-south1",
-    timeoutSeconds: 120,
+    timeoutSeconds: 300,
     secrets: [geminiApiKey, googleMapsApiKey],
     enforceAppCheck: false,
     invoker: "public",
@@ -181,11 +181,17 @@ export const getTourPackageDetail = onCall(
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
     const packageId = String(request.data.packageId ?? "").trim();
+    const countryCode = String(request.data.countryCode ?? "").trim();
+    const genreId = String(request.data.genreId ?? "").trim();
     if (!packageId) {
       throw new HttpsError("invalid-argument", "packageId is required.");
     }
     try {
-      return await getTourPackageDetailService(packageId);
+      return await getTourPackageDetailService(
+        packageId,
+        countryCode || undefined,
+        genreId || undefined
+      );
     } catch (error) {
       throw toHttpsError(error);
     }
@@ -195,7 +201,7 @@ export const getTourPackageDetail = onCall(
 export const createTripFromPackage = onCall(
   {
     region: "asia-south1",
-    timeoutSeconds: 120,
+    timeoutSeconds: 300,
     secrets: [geminiApiKey, googleMapsApiKey],
     enforceAppCheck: false,
     invoker: "public",
@@ -205,6 +211,8 @@ export const createTripFromPackage = onCall(
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
     const packageId = String(request.data.packageId ?? "").trim();
+    const countryCode = String(request.data.countryCode ?? "").trim();
+    const genreId = String(request.data.genreId ?? "").trim();
     const origin = String(request.data.origin ?? "Current location").trim();
     const languageCode = validateLanguageCode(String(request.data.languageCode ?? "en"));
     if (!packageId) {
@@ -221,6 +229,8 @@ export const createTripFromPackage = onCall(
         packageId,
         origin,
         languageCode,
+        countryCode: countryCode || undefined,
+        genreId: genreId || undefined,
       });
     } catch (error) {
       throw toHttpsError(error);

@@ -59,16 +59,26 @@ class FirebaseCuratedContentDataSource @Inject constructor(
         )
     }
 
-    suspend fun getTourPackageDetail(packageId: String): TourPackageDetail {
+    suspend fun getTourPackageDetail(
+        packageId: String,
+        countryCode: String,
+        genreId: String
+    ): TourPackageDetail {
         val data = callFunction(
             "getTourPackageDetail",
-            mapOf("packageId" to packageId)
+            mapOf(
+                "packageId" to packageId,
+                "countryCode" to countryCode,
+                "genreId" to genreId
+            )
         )
         return parseTourPackageDetail(data)
     }
 
     suspend fun createTripFromPackage(
         packageId: String,
+        countryCode: String,
+        genreId: String,
         origin: String,
         languageCode: String
     ): TripPlan {
@@ -76,6 +86,8 @@ class FirebaseCuratedContentDataSource @Inject constructor(
             "createTripFromPackage",
             mapOf(
                 "packageId" to packageId,
+                "countryCode" to countryCode,
+                "genreId" to genreId,
                 "origin" to origin,
                 "languageCode" to languageCode
             )

@@ -113,17 +113,31 @@ export async function getGenrePackages(countryCode: string, genreId: string) {
   return doc;
 }
 
-export async function getTourPackageDetail(packageId: string) {
+export async function getTourPackageDetail(
+  packageId: string,
+  countryCode?: string,
+  genreId?: string
+) {
   const cacheRef = db.collection("tourPackages").doc(packageId);
   const cached = await cacheRef.get();
   if (cached.exists) {
     return cached.data();
   }
 
-  throw new HttpsError(
-    "not-found",
-    `Tour package ${packageId} not found. Open it from a genre package list first.`
+  const resolved = await resolvePackageSummary(packageId, countryCode, genreId);
+  if (!resolved) {
+    throw new HttpsError(
+      "not-found",
+      `Tour package ${packageId} not found. Browse packages from a genre tile first.`
+    );
+  }
+
+  const detail = await ensureTourPackageDetail(
+    resolved.countryCode,
+    resolved.genreId,
+    resolved.summary
   );
+  return detail;
 }
 
 export async function ensureTourPackageDetail(
@@ -148,14 +162,15 @@ export async function createTripFromPackage(input: {
   packageId: string;
   origin: string;
   languageCode: string;
+  countryCode?: string;
+  genreId?: string;
 }) {
-  const packageRef = db.collection("tourPackages").doc(input.packageId);
-  const packageDoc = await packageRef.get();
-  if (!packageDoc.exists) {
-    throw new HttpsError("not-found", `Tour package ${input.packageId} not found.`);
-  }
-
-  const detail = packageDoc.data() as TourPackageDetailDoc;
+  const detailData = await getTourPackageDetail(
+    input.packageId,
+    input.countryCode,
+    input.genreId
+  );
+  const detail = detailData as TourPackageDetailDoc;
   const tripRef = db.collection("trips").doc();
   const attractions = detail.spots.map((spot, index) => ({
     id: spot.id,
@@ -254,7 +269,7 @@ async function generatePackagesWithGemini(
 ): Promise<PackageSummaryDoc[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return fallbackPackages(countryCode, genre);
+    return buildFallbackPackages(countryCode, genre);
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
@@ -318,8 +333,66 @@ Rules:
       genreId: genre.id,
       error: error instanceof Error ? error.message : "unknown",
     });
-    return fallbackPackages(countryCode, genre);
+    return await buildFallbackPackages(countryCode, genre);
   }
+}
+
+async function resolvePackageSummary(
+  packageId: string,
+  countryCode?: string,
+  genreId?: string
+): Promise<{ countryCode: string; genreId: string; summary: PackageSummaryDoc } | null> {
+  if (countryCode && genreId) {
+    const found = await findPackageInCuratedList(
+      countryCode.trim().toUpperCase(),
+      genreId.trim(),
+      packageId
+    );
+    if (found) return found;
+  }
+
+  const snapshot = await db.collection("curatedPackages").get();
+  for (const doc of snapshot.docs) {
+    const data = doc.data();
+    const packages = (data.packages as PackageSummaryDoc[] | undefined) ?? [];
+    const summary = packages.find((pkg) => pkg.id === packageId);
+    if (summary) {
+      return {
+        countryCode: String(data.countryCode ?? ""),
+        genreId: String(data.genreId ?? ""),
+        summary,
+      };
+    }
+  }
+  return null;
+}
+
+async function findPackageInCuratedList(
+  countryCode: string,
+  genreId: string,
+  packageId: string
+): Promise<{ countryCode: string; genreId: string; summary: PackageSummaryDoc } | null> {
+  const cacheRef = db.collection("curatedPackages").doc(`${countryCode}_${genreId}`);
+  const cached = await cacheRef.get();
+  if (!cached.exists) return null;
+
+  const data = cached.data()!;
+  const packages = (data.packages as PackageSummaryDoc[] | undefined) ?? [];
+  const summary = packages.find((pkg) => pkg.id === packageId);
+  if (!summary) return null;
+
+  return { countryCode, genreId, summary };
+}
+
+async function buildFallbackPackages(
+  countryCode: string,
+  genre: GenreDoc
+): Promise<PackageSummaryDoc[]> {
+  const packages = fallbackPackageSummaries(countryCode, genre);
+  await Promise.all(
+    packages.map((summary) => ensureTourPackageDetail(countryCode, genre.id, summary))
+  );
+  return packages;
 }
 
 async function generateTourPackageDetail(
@@ -532,7 +605,7 @@ function fallbackGenres(countryCode: string): GenreDoc[] {
   ];
 }
 
-function fallbackPackages(countryCode: string, genre: GenreDoc): PackageSummaryDoc[] {
+function fallbackPackageSummaries(countryCode: string, genre: GenreDoc): PackageSummaryDoc[] {
   const prefix = countryCode.toLowerCase();
   return [
     {

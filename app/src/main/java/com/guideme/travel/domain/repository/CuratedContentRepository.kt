@@ -8,9 +8,15 @@ import com.guideme.travel.domain.model.TripPlan
 interface CuratedContentRepository {
     suspend fun getCountryGenres(countryCode: String): CountryGenres
     suspend fun getGenrePackages(countryCode: String, genreId: String): GenrePackages
-    suspend fun getTourPackageDetail(packageId: String): TourPackageDetail
+    suspend fun getTourPackageDetail(
+        packageId: String,
+        countryCode: String,
+        genreId: String
+    ): TourPackageDetail
     suspend fun createTripFromPackage(
         packageId: String,
+        countryCode: String,
+        genreId: String,
         origin: String,
         languageCode: String
     ): TripPlan

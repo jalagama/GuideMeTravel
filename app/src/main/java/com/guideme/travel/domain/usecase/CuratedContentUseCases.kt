@@ -32,8 +32,12 @@ class GetGenrePackagesUseCase @Inject constructor(
 class GetTourPackageDetailUseCase @Inject constructor(
     private val curatedContentRepository: CuratedContentRepository
 ) {
-    suspend operator fun invoke(packageId: String): TourPackageDetail {
-        return curatedContentRepository.getTourPackageDetail(packageId)
+    suspend operator fun invoke(
+        packageId: String,
+        countryCode: String,
+        genreId: String
+    ): TourPackageDetail {
+        return curatedContentRepository.getTourPackageDetail(packageId, countryCode, genreId)
     }
 }
 
@@ -42,9 +46,17 @@ class StartTripFromPackageUseCase @Inject constructor(
 ) {
     suspend operator fun invoke(
         packageId: String,
+        countryCode: String,
+        genreId: String,
         origin: String,
         languageCode: String
     ): TripPlan {
-        return curatedContentRepository.createTripFromPackage(packageId, origin, languageCode)
+        return curatedContentRepository.createTripFromPackage(
+            packageId,
+            countryCode,
+            genreId,
+            origin,
+            languageCode
+        )
     }
 }

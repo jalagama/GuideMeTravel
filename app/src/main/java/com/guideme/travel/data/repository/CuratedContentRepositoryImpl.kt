@@ -28,16 +28,28 @@ class CuratedContentRepositoryImpl @Inject constructor(
         return remoteDataSource.getGenrePackages(countryCode, genreId)
     }
 
-    override suspend fun getTourPackageDetail(packageId: String): TourPackageDetail {
-        return remoteDataSource.getTourPackageDetail(packageId)
+    override suspend fun getTourPackageDetail(
+        packageId: String,
+        countryCode: String,
+        genreId: String
+    ): TourPackageDetail {
+        return remoteDataSource.getTourPackageDetail(packageId, countryCode, genreId)
     }
 
     override suspend fun createTripFromPackage(
         packageId: String,
+        countryCode: String,
+        genreId: String,
         origin: String,
         languageCode: String
     ): TripPlan {
-        val trip = remoteDataSource.createTripFromPackage(packageId, origin, languageCode)
+        val trip = remoteDataSource.createTripFromPackage(
+            packageId,
+            countryCode,
+            genreId,
+            origin,
+            languageCode
+        )
         val readyTrip = trip.copy(status = TripStatus.READY)
         tripDao.upsertTrip(readyTrip.toEntity())
         attractionDao.upsertAttractions(readyTrip.attractions.map { it.toEntity(readyTrip.id) })

@@ -21,7 +21,11 @@ object TripsRoute
 data class GenreDetailRoute(val countryCode: String, val genreId: String)
 
 @Serializable
-data class TourPackageDetailRoute(val packageId: String)
+data class TourPackageDetailRoute(
+    val packageId: String,
+    val countryCode: String,
+    val genreId: String
+)
 
 @Serializable
 data class ItineraryRoute(val tripId: String)

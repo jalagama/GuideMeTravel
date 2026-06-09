@@ -133,13 +133,20 @@ fun GuideMeApp(
                 )
             }
 
-            composable<GenreDetailRoute> {
+            composable<GenreDetailRoute> { entry ->
+                val genreRoute = entry.toRoute<GenreDetailRoute>()
                 val viewModel: GenreDetailViewModel = hiltViewModel()
                 val uiState by viewModel.uiState.collectAsState()
                 GenreDetailScreen(
                     uiState = uiState,
                     onOpenPackage = { packageId ->
-                        navController.navigate(TourPackageDetailRoute(packageId))
+                        navController.navigate(
+                            TourPackageDetailRoute(
+                                packageId = packageId,
+                                countryCode = genreRoute.countryCode,
+                                genreId = genreRoute.genreId
+                            )
+                        )
                     }
                 )
             }

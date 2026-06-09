@@ -44,7 +44,13 @@ class TourPackageDetailViewModel @Inject constructor(
     private fun loadDetail() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            runCatching { getTourPackageDetailUseCase(route.packageId) }
+            runCatching {
+                getTourPackageDetailUseCase(
+                    packageId = route.packageId,
+                    countryCode = route.countryCode,
+                    genreId = route.genreId
+                )
+            }
                 .onSuccess { detail ->
                     _uiState.update { it.copy(isLoading = false, detail = detail) }
                 }
@@ -66,6 +72,8 @@ class TourPackageDetailViewModel @Inject constructor(
             runCatching {
                 startTripFromPackageUseCase(
                     packageId = route.packageId,
+                    countryCode = route.countryCode,
+                    genreId = route.genreId,
                     origin = "Current location",
                     languageCode = language
                 )

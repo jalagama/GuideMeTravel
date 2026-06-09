@@ -84,9 +84,9 @@ class AuthRepositoryImpl @Inject constructor(
         firebaseAuth.signOut()
     }
 
-    override suspend fun getIdToken(): String {
+    override suspend fun getIdToken(forceRefresh: Boolean): String {
         val user = firebaseAuth.currentUser ?: error("Not signed in")
-        return user.getIdToken(false).await().token ?: error("Unable to fetch ID token")
+        return user.getIdToken(forceRefresh).await().token ?: error("Unable to fetch ID token")
     }
 
     private fun com.google.firebase.auth.FirebaseUser.toAuthUser(): AuthUser {

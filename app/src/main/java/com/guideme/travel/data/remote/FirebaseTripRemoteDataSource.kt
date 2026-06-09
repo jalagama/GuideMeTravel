@@ -1,6 +1,9 @@
 package com.guideme.travel.data.remote
 
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.functions.FirebaseFunctions
+import com.google.firebase.functions.FirebaseFunctionsException
+import com.google.firebase.appcheck.FirebaseAppCheck
 import com.guideme.travel.BuildConfig
 import com.guideme.travel.domain.model.Attraction
 import com.guideme.travel.domain.model.AttractionStatus
@@ -10,9 +13,6 @@ import com.guideme.travel.domain.repository.AuthRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -26,23 +26,37 @@ data class GuidePackFile(
 @Singleton
 class FirebaseTripRemoteDataSource @Inject constructor(
     private val functions: FirebaseFunctions,
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val firebaseAuth: FirebaseAuth
 ) {
     suspend fun generateItinerary(
         origin: String,
         destination: String,
         languageCode: String
     ): TripPlan {
-        val result = functions
-            .getHttpsCallable("generateItinerary")
-            .call(
-                mapOf(
-                    "origin" to origin,
-                    "destination" to destination,
-                    "languageCode" to languageCode
+        authRepository.ensureSignedIn()
+        val uid = firebaseAuth.currentUser?.uid
+            ?: error("Not signed in. Enable Anonymous Auth in Firebase Console.")
+        authRepository.getIdToken(forceRefresh = true)
+
+        if (!BuildConfig.DEBUG) {
+            FirebaseAppCheck.getInstance().getAppCheckToken(true).await()
+        }
+
+        val result = try {
+            functions
+                .getHttpsCallable("generateItinerary")
+                .call(
+                    mapOf(
+                        "origin" to origin,
+                        "destination" to destination,
+                        "languageCode" to languageCode
+                    )
                 )
-            )
-            .await()
+                .await()
+        } catch (error: Exception) {
+            throw mapRemoteError(error, uid)
+        }
 
         @Suppress("UNCHECKED_CAST")
         val data = result.getData() as Map<String, Any?>
@@ -50,53 +64,40 @@ class FirebaseTripRemoteDataSource @Inject constructor(
     }
 
     suspend fun generateGuidePack(tripId: String): List<GuidePackFile> = withContext(Dispatchers.IO) {
-        val token = authRepository.getIdToken()
-        val url = URL("${BuildConfig.GUIDE_PACK_BASE_URL}/generateGuidePack")
-        val connection = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            setRequestProperty("Authorization", "Bearer $token")
-            setRequestProperty("Content-Type", "application/json")
-            doOutput = true
-            connectTimeout = 30_000
-            readTimeout = 900_000
+        authRepository.ensureSignedIn()
+        val uid = firebaseAuth.currentUser?.uid
+            ?: error("Not signed in. Enable Anonymous Auth in Firebase Console.")
+        authRepository.getIdToken(forceRefresh = true)
+
+        if (!BuildConfig.DEBUG) {
+            FirebaseAppCheck.getInstance().getAppCheckToken(true).await()
         }
 
-        connection.outputStream.bufferedWriter().use {
-            it.write(JSONObject(mapOf("tripId" to tripId)).toString())
+        val result = try {
+            functions
+                .getHttpsCallable("generateGuidePack")
+                .call(mapOf("tripId" to tripId))
+                .await()
+        } catch (error: Exception) {
+            throw mapRemoteError(error, uid)
         }
 
-        val responseCode = connection.responseCode
-        val body = if (responseCode in 200..299) {
-            connection.inputStream.bufferedReader().readText()
-        } else {
-            connection.errorStream?.bufferedReader()?.readText()
-                ?: "Guide pack request failed with code $responseCode"
-        }
-        connection.disconnect()
-
-        if (responseCode !in 200..299) {
-            error(body)
-        }
-
-        val json = JSONObject(body)
-        val audioFiles = json.getJSONArray("audioFiles")
-        buildList {
-            for (index in 0 until audioFiles.length()) {
-                val file = audioFiles.getJSONObject(index)
-                add(
-                    GuidePackFile(
-                        attractionId = file.getString("attractionId"),
-                        url = file.getString("url"),
-                        storagePath = file.optString("storagePath").ifBlank { null },
-                        transcript = file.getString("transcript")
-                    )
-                )
-            }
-        }
+        @Suppress("UNCHECKED_CAST")
+        val data = result.getData() as Map<String, Any?>
+        parseGuidePackFiles(data)
     }
 
-    suspend fun deleteTripFromCloud(tripId: String) {
-        // Firestore client delete is handled via direct SDK in TripRepositoryImpl
+    @Suppress("UNCHECKED_CAST")
+    private fun parseGuidePackFiles(data: Map<String, Any?>): List<GuidePackFile> {
+        val audioFiles = data["audioFiles"] as? List<Map<String, Any?>> ?: emptyList()
+        return audioFiles.map { file ->
+            GuidePackFile(
+                attractionId = file["attractionId"] as String,
+                url = file["url"] as String,
+                storagePath = (file["storagePath"] as? String)?.ifBlank { null },
+                transcript = file["transcript"] as String
+            )
+        }
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -129,5 +130,59 @@ class FirebaseTripRemoteDataSource @Inject constructor(
             offlinePackSizeMb = (data["offlinePackSizeMb"] as? Number)?.toInt() ?: 0,
             offlinePackDownloaded = data["offlinePackDownloaded"] as? Boolean ?: false
         )
+    }
+
+    suspend fun deleteTripFromCloud(tripId: String) {
+        // Firestore client delete is handled via direct SDK in TripRepositoryImpl
+    }
+
+    private fun mapRemoteError(error: Exception, uid: String): Exception {
+        val rawMessage = error.message.orEmpty()
+
+        if (rawMessage.contains("not authorized to invoke this service", ignoreCase = true) ||
+            rawMessage.contains("access token could not be verified", ignoreCase = true)
+        ) {
+            return IllegalStateException(
+                "Cloud Run blocked the function call (IAM). Redeploy with invoker: public, then run: " +
+                    "gcloud run services add-iam-policy-binding generateitinerary " +
+                    "--region=asia-south1 --member=allUsers --role=roles/run.invoker " +
+                    "--project=travelguide-47f80",
+                error
+            )
+        }
+
+        if (error is FirebaseFunctionsException) {
+            val details = error.details?.toString()?.takeIf { it.isNotBlank() }
+            val baseMessage = listOfNotNull(error.message, details).joinToString(" — ")
+
+            if (error.code == FirebaseFunctionsException.Code.UNAUTHENTICATED) {
+                val hint = if (BuildConfig.DEBUG) {
+                    "Debug checklist: (1) Firebase Console > App Check > APIs > set Cloud Functions " +
+                        "and Authentication to Unenforced, (2) Authentication > Anonymous enabled, " +
+                        "(3) deploy generateItinerary to asia-south1 in project travelguide-47f80, " +
+                        "(4) signed-in uid was $uid."
+                } else {
+                    "Confirm you are signed in and App Check (Play Integrity) is configured for release."
+                }
+                return IllegalStateException("$baseMessage. $hint", error)
+            }
+
+            if (error.code == FirebaseFunctionsException.Code.NOT_FOUND) {
+                return IllegalStateException(
+                    "$baseMessage. Deploy backend/functions to region asia-south1.",
+                    error
+                )
+            }
+
+            if (error.code == FirebaseFunctionsException.Code.RESOURCE_EXHAUSTED) {
+                return IllegalStateException(
+                    "$baseMessage. You hit the itinerary rate limit (30/hour). " +
+                        "In Firestore delete rateLimits/itinerary:$uid or wait up to 1 hour.",
+                    error
+                )
+            }
+        }
+
+        return error
     }
 }

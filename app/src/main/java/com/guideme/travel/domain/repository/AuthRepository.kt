@@ -13,5 +13,5 @@ interface AuthRepository {
     suspend fun linkAnonymousWithGoogle(idToken: String): AuthUser
     suspend fun linkAnonymousWithEmail(email: String, password: String): AuthUser
     suspend fun signOut()
-    suspend fun getIdToken(): String
+    suspend fun getIdToken(forceRefresh: Boolean = false): String
 }

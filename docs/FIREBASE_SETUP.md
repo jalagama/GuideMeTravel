@@ -56,13 +56,31 @@ npm install --cache ./.npm-cache
 npm run build
 
 firebase login
-firebase use YOUR_PROJECT_ID
+firebase use travelguide-47f80
 firebase functions:secrets:set GEMINI_API_KEY
 firebase functions:secrets:set GOOGLE_MAPS_API_KEY
 
 cd ..
-firebase deploy
+firebase deploy --only functions
 ```
+
+If the Android app shows **"The request was not authorized to invoke this service"**, Cloud Run IAM is blocking the callable. Fix it:
+
+```bash
+gcloud run services add-iam-policy-binding generateitinerary \
+  --region=asia-south1 \
+  --member="allUsers" \
+  --role="roles/run.invoker" \
+  --project=travelguide-47f80
+```
+
+List services if the name differs:
+
+```bash
+gcloud run services list --region=asia-south1 --project=travelguide-47f80
+```
+
+`allUsers` + `roles/run.invoker` is required for Firebase Callable from the mobile app. App Check and Firebase Auth still protect the function logic.
 
 ## 6. Optional: Cloud Run for heavy guide packs
 

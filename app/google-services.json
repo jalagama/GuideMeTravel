@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "568960151390-lkal39k3i33p89fe523fg1vvlp1qgg7i.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.guideme.travel",
+            "certificate_hash": "8b0ed1e9e7cc75dda4b2256a08588df09aeefdf5"
+          }
+        },
+        {
           "client_id": "568960151390-rvmq1et5h37antj6o4kgg1t48bifpd6l.apps.googleusercontent.com",
           "client_type": 3
         }

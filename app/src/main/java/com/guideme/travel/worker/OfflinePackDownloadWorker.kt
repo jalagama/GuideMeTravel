@@ -1,6 +1,7 @@
 package com.guideme.travel.worker
 
 import android.content.Context
+import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -38,11 +39,18 @@ class OfflinePackDownloadWorker @AssistedInject constructor(
             }
             Result.success()
         }.getOrElse { error ->
-            Result.retry()
+            Log.e(TAG, "Offline pack download failed for $tripId (attempt ${runAttemptCount + 1})", error)
+            val message = error.message ?: "Offline pack download failed"
+            if (runAttemptCount >= MAX_ATTEMPTS - 1) {
+                Result.failure(workDataOf(KEY_ERROR to message))
+            } else {
+                Result.retry()
+            }
         }
     }
 
     companion object {
+        private const val TAG = "OfflinePackDownloadWorker"
         const val KEY_TRIP_ID = "trip_id"
         const val KEY_PROGRESS = "progress"
         const val KEY_TASK = "task"

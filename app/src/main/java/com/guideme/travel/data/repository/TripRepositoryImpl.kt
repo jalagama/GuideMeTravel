@@ -98,15 +98,19 @@ class TripRepositoryImpl @Inject constructor(
 
         tripDao.upsertTrip(trip.copy(status = TripStatus.DOWNLOADING).toEntity())
 
-        val updated = offlinePackManager.downloadPack(
-            trip = trip,
-            useFirebase = useFirebase,
-            onProgress = onProgress
-        )
-
-        tripDao.upsertTrip(updated.copy(status = TripStatus.READY).toEntity())
-        attractionDao.upsertAttractions(updated.attractions.map { it.toEntity(tripId) })
-        return updated.copy(status = TripStatus.READY)
+        return try {
+            val updated = offlinePackManager.downloadPack(
+                trip = trip,
+                useFirebase = useFirebase,
+                onProgress = onProgress
+            )
+            tripDao.upsertTrip(updated.copy(status = TripStatus.READY).toEntity())
+            attractionDao.upsertAttractions(updated.attractions.map { it.toEntity(tripId) })
+            updated.copy(status = TripStatus.READY)
+        } catch (error: Exception) {
+            tripDao.upsertTrip(trip.copy(status = TripStatus.READY).toEntity())
+            throw error
+        }
     }
 
     override suspend fun startTrip(tripId: String) {

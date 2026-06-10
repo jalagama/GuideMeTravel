@@ -14,6 +14,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.guideme.travel.ui.auth.AuthScreen
+import com.guideme.travel.ui.booking.BookTripScreen
+import com.guideme.travel.ui.booking.BookTripViewModel
 import com.guideme.travel.ui.auth.AuthViewModel
 import com.guideme.travel.ui.components.GuideMeScaffold
 import com.guideme.travel.ui.components.MainTab
@@ -26,6 +28,7 @@ import com.guideme.travel.ui.itinerary.ItineraryViewModel
 import com.guideme.travel.ui.map.TripMapScreen
 import com.guideme.travel.ui.map.TripMapViewModel
 import com.guideme.travel.ui.navigation.AuthRoute
+import com.guideme.travel.ui.navigation.BookTripRoute
 import com.guideme.travel.ui.navigation.DownloadRoute
 import com.guideme.travel.ui.navigation.GenreDetailRoute
 import com.guideme.travel.ui.navigation.GuidePlayerRoute
@@ -151,19 +154,40 @@ fun GuideMeApp(
                 )
             }
 
-            composable<TourPackageDetailRoute> {
+            composable<TourPackageDetailRoute> { entry ->
+                val detailRoute = entry.toRoute<TourPackageDetailRoute>()
                 val viewModel: TourPackageDetailViewModel = hiltViewModel()
                 val uiState by viewModel.uiState.collectAsState()
                 TourPackageDetailScreen(
                     uiState = uiState,
-                    onStartTrip = {
-                        viewModel.startTrip { tripId ->
-                            navController.navigate(ItineraryRoute(tripId))
+                    onBookTrip = {
+                        navController.navigate(
+                            BookTripRoute(
+                                packageId = detailRoute.packageId,
+                                countryCode = detailRoute.countryCode,
+                                genreId = detailRoute.genreId
+                            )
+                        )
+                    },
+                    onPlayPreview = { spotId, _ -> viewModel.setPlayingSpot(spotId) },
+                    onStopPreview = { viewModel.setPlayingSpot(null) }
+                )
+            }
+
+            composable<BookTripRoute> { entry ->
+                val bookRoute = entry.toRoute<BookTripRoute>()
+                val viewModel: BookTripViewModel = hiltViewModel()
+                val uiState by viewModel.uiState.collectAsState()
+                BookTripScreen(
+                    uiState = uiState,
+                    onDownloadOffline = {
+                        viewModel.bookForDownload { tripId ->
+                            navController.navigate(DownloadRoute(tripId))
                         }
                     },
-                    onDownload = {
-                        viewModel.startTrip { tripId ->
-                            navController.navigate(DownloadRoute(tripId))
+                    onStartOnline = {
+                        viewModel.bookForOnline { tripId ->
+                            navController.navigate(ItineraryRoute(tripId))
                         }
                     }
                 )

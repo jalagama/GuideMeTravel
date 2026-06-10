@@ -11,10 +11,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -22,8 +24,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import com.guideme.travel.R
 import coil.compose.AsyncImage
+import com.guideme.travel.R
 import com.guideme.travel.domain.model.TourPackageSummary
 import com.guideme.travel.ui.components.GuideMeCard
 
@@ -33,7 +35,7 @@ fun GenreDetailScreen(
     onOpenPackage: (String) -> Unit
 ) {
     when {
-        uiState.isLoading -> {
+        uiState.isLoading && uiState.packages.isEmpty() -> {
             Column(
                 modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -42,7 +44,7 @@ fun GenreDetailScreen(
                 CircularProgressIndicator()
             }
         }
-        uiState.errorMessage != null -> {
+        uiState.errorMessage != null && uiState.packages.isEmpty() -> {
             Text(
                 text = uiState.errorMessage,
                 color = MaterialTheme.colorScheme.error,
@@ -82,32 +84,55 @@ private fun DestinationTile(
     onClick: () -> Unit
 ) {
     GuideMeCard(modifier = Modifier.clickable(onClick = onClick)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                color = MaterialTheme.colorScheme.primaryContainer,
+                shape = MaterialTheme.shapes.small,
+                modifier = Modifier.width(36.dp)
+            ) {
+                Text(
+                    text = "#${destination.rank}",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            }
             AsyncImage(
                 model = destination.heroImageUrl,
                 contentDescription = destination.title,
-                modifier = Modifier.size(96.dp),
+                modifier = Modifier.size(72.dp),
                 contentScale = ContentScale.Crop
             )
             Column(modifier = Modifier.weight(1f)) {
-                Text(destination.title, style = MaterialTheme.typography.titleLarge)
+                Text(destination.title, style = MaterialTheme.typography.titleMedium)
                 Text(
-                    destination.region,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    destination.shortInfo,
+                    "${destination.region} • ${destination.days} days",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    stringResource(R.string.suggested_days, destination.days),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 4.dp)
+                    destination.shortInfo,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2
                 )
+                if (destination.bestFor.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = MaterialTheme.shapes.extraSmall
+                    ) {
+                        Text(
+                            destination.bestFor,
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+                }
             }
         }
     }

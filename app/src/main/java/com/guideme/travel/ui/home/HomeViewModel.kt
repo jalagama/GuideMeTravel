@@ -5,9 +5,12 @@ import androidx.lifecycle.viewModelScope
 import com.guideme.travel.domain.model.CuratedGenre
 import com.guideme.travel.domain.model.TripPlan
 import com.guideme.travel.domain.usecase.CreateTripUseCase
+import com.guideme.travel.domain.usecase.EnqueueCatalogPrefetchUseCase
 import com.guideme.travel.domain.usecase.GetCountryGenresUseCase
+import com.guideme.travel.domain.usecase.ObserveCountryGenresUseCase
 import com.guideme.travel.domain.usecase.ObserveDefaultLanguageUseCase
 import com.guideme.travel.domain.usecase.ObserveTripsUseCase
+import com.guideme.travel.domain.usecase.RefreshCountryGenresUseCase
 import com.guideme.travel.domain.usecase.SetDefaultLanguageUseCase
 import com.guideme.travel.util.PlaceSuggestion
 import com.guideme.travel.util.PlacesAutocompleteHelper
@@ -30,15 +33,20 @@ data class HomeUiState(
     val countryName: String = "",
     val genres: List<CuratedGenre> = emptyList(),
     val isLoadingGenres: Boolean = true,
+    val isRefreshing: Boolean = false,
     val isCreatingTrip: Boolean = false,
     val recentTrips: List<TripPlan> = emptyList(),
     val searchSuggestions: List<PlaceSuggestion> = emptyList(),
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val lastUpdatedMillis: Long = 0L
 )
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
+    private val observeCountryGenresUseCase: ObserveCountryGenresUseCase,
     private val getCountryGenresUseCase: GetCountryGenresUseCase,
+    private val refreshCountryGenresUseCase: RefreshCountryGenresUseCase,
+    private val enqueueCatalogPrefetchUseCase: EnqueueCatalogPrefetchUseCase,
     private val createTripUseCase: CreateTripUseCase,
     private val observeTripsUseCase: ObserveTripsUseCase,
     private val observeDefaultLanguageUseCase: ObserveDefaultLanguageUseCase,
@@ -48,6 +56,7 @@ class HomeViewModel @Inject constructor(
 
     private val formState = MutableStateFlow(HomeUiState())
     private var searchJob: Job? = null
+    private var countryCode: String = ""
 
     val uiState: StateFlow<HomeUiState> = combine(
         formState,
@@ -78,7 +87,25 @@ class HomeViewModel @Inject constructor(
 
     fun loadGenres() {
         viewModelScope.launch {
+            countryCode = observeCountryGenresUseCase.countryCode()
             formState.update { it.copy(isLoadingGenres = true, errorMessage = null) }
+
+            launch {
+                observeCountryGenresUseCase(countryCode).collect { cached ->
+                    if (cached != null) {
+                        formState.update {
+                            it.copy(
+                                isLoadingGenres = false,
+                                countryCode = cached.countryCode,
+                                countryName = cached.countryName,
+                                genres = cached.genres.sortedBy { g -> g.rank },
+                                lastUpdatedMillis = cached.updatedAtMillis
+                            )
+                        }
+                    }
+                }
+            }
+
             runCatching { getCountryGenresUseCase() }
                 .onSuccess { result ->
                     formState.update {
@@ -86,15 +113,45 @@ class HomeViewModel @Inject constructor(
                             isLoadingGenres = false,
                             countryCode = result.countryCode,
                             countryName = result.countryName,
-                            genres = result.genres
+                            genres = result.genres.sortedBy { g -> g.rank },
+                            lastUpdatedMillis = result.updatedAtMillis
                         )
                     }
+                    enqueueCatalogPrefetchUseCase(result.countryCode, result.genres.map { it.id })
+                }
+                .onFailure { error ->
+                    val hasCache = formState.value.genres.isNotEmpty()
+                    formState.update {
+                        it.copy(
+                            isLoadingGenres = false,
+                            errorMessage = if (hasCache) null else error.message ?: "Failed to load destinations"
+                        )
+                    }
+                }
+        }
+    }
+
+    fun refreshGenres() {
+        viewModelScope.launch {
+            formState.update { it.copy(isRefreshing = true, errorMessage = null) }
+            runCatching { refreshCountryGenresUseCase() }
+                .onSuccess { result ->
+                    formState.update {
+                        it.copy(
+                            isRefreshing = false,
+                            countryCode = result.countryCode,
+                            countryName = result.countryName,
+                            genres = result.genres.sortedBy { g -> g.rank },
+                            lastUpdatedMillis = result.updatedAtMillis
+                        )
+                    }
+                    enqueueCatalogPrefetchUseCase(result.countryCode, result.genres.map { it.id })
                 }
                 .onFailure { error ->
                     formState.update {
                         it.copy(
-                            isLoadingGenres = false,
-                            errorMessage = error.message ?: "Failed to load destinations"
+                            isRefreshing = false,
+                            errorMessage = error.message ?: "Failed to refresh destinations"
                         )
                     }
                 }

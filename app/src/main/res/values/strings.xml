@@ -46,4 +46,12 @@
     <string name="trip_in_progress">Trip in progress</string>
     <string name="notification_channel_trip">Trip guide</string>
     <string name="notification_trip_active">GuideMe is guiding your trip</string>
+    <string name="top_pick">Top pick</string>
+    <string name="curator_highlights">Curator\'s highlights</string>
+    <string name="listen_before_you_go">Listen before you go</string>
+    <string name="book_trip_free">Book this trip — Free</string>
+    <string name="book_trip">Book trip</string>
+    <string name="free_badge">Free</string>
+    <string name="book_trip_explainer">Choose how you want to experience this curated journey. Both options include the full itinerary, map, and audio guides.</string>
+    <string name="offline_connect_once">Connect once to download this collection.</string>
 </resources>

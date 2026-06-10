@@ -39,56 +39,66 @@ fun resolveShellState(entry: NavBackStackEntry?): ShellState {
                                     )
                                 }
                                 .getOrElse {
-                                    runCatching { entry.toRoute<ItineraryRoute>() }
+                                    runCatching { entry.toRoute<BookTripRoute>() }
                                         .map {
                                             ShellState(
-                                                title = "Your itinerary",
+                                                title = "Book trip",
                                                 showBack = true,
-                                                selectedTab = MainTab.Trips
+                                                selectedTab = MainTab.Home
                                             )
                                         }
                                         .getOrElse {
-                                            runCatching { entry.toRoute<DownloadRoute>() }
+                                            runCatching { entry.toRoute<ItineraryRoute>() }
                                                 .map {
                                                     ShellState(
-                                                        title = "Offline pack",
+                                                        title = "Your itinerary",
                                                         showBack = true,
                                                         selectedTab = MainTab.Trips
                                                     )
                                                 }
                                                 .getOrElse {
-                                                    runCatching { entry.toRoute<TripMapRoute>() }
+                                                    runCatching { entry.toRoute<DownloadRoute>() }
                                                         .map {
                                                             ShellState(
-                                                                title = "Trip map",
+                                                                title = "Offline pack",
                                                                 showBack = true,
                                                                 selectedTab = MainTab.Trips
                                                             )
                                                         }
                                                         .getOrElse {
-                                                            runCatching { entry.toRoute<GuidePlayerRoute>() }
+                                                            runCatching { entry.toRoute<TripMapRoute>() }
                                                                 .map {
                                                                     ShellState(
-                                                                        title = "Audio guide",
+                                                                        title = "Trip map",
                                                                         showBack = true,
                                                                         selectedTab = MainTab.Trips
                                                                     )
                                                                 }
                                                                 .getOrElse {
-                                                                    runCatching { entry.toRoute<TripSummaryRoute>() }
+                                                                    runCatching { entry.toRoute<GuidePlayerRoute>() }
                                                                         .map {
                                                                             ShellState(
-                                                                                title = "Trip summary",
+                                                                                title = "Audio guide",
                                                                                 showBack = true,
                                                                                 selectedTab = MainTab.Trips
                                                                             )
                                                                         }
                                                                         .getOrElse {
-                                                                            ShellState(
-                                                                                title = "GuideMe",
-                                                                                showBack = false,
-                                                                                selectedTab = MainTab.Home
-                                                                            )
+                                                                            runCatching { entry.toRoute<TripSummaryRoute>() }
+                                                                                .map {
+                                                                                    ShellState(
+                                                                                        title = "Trip summary",
+                                                                                        showBack = true,
+                                                                                        selectedTab = MainTab.Trips
+                                                                                    )
+                                                                                }
+                                                                                .getOrElse {
+                                                                                    ShellState(
+                                                                                        title = "GuideMe",
+                                                                                        showBack = false,
+                                                                                        selectedTab = MainTab.Home
+                                                                                    )
+                                                                                }
                                                                         }
                                                                 }
                                                         }

@@ -1,6 +1,7 @@
 package com.guideme.travel.ui.package_detail
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -12,10 +13,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -39,17 +45,19 @@ import com.guideme.travel.domain.model.TourPackageDetail
 import com.guideme.travel.ui.components.GuideMeCard
 import com.guideme.travel.ui.components.addCuratedSpotsMapLayers
 import com.guideme.travel.ui.components.curatedMapCenter
+import com.guideme.travel.util.PreviewTtsHelper
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.maps.MapView
 
 @Composable
 fun TourPackageDetailScreen(
     uiState: TourPackageDetailUiState,
-    onStartTrip: () -> Unit,
-    onDownload: (String) -> Unit
+    onBookTrip: () -> Unit,
+    onPlayPreview: (String, String) -> Unit,
+    onStopPreview: () -> Unit
 ) {
     when {
-        uiState.isLoading -> {
+        uiState.isLoading && uiState.detail == null -> {
             Column(
                 modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -68,10 +76,10 @@ fun TourPackageDetailScreen(
         uiState.detail != null -> {
             TourPackageDetailContent(
                 detail = uiState.detail,
-                isStartingTrip = uiState.isStartingTrip,
-                errorMessage = uiState.errorMessage,
-                onStartTrip = onStartTrip,
-                onDownload = onDownload
+                playingSpotId = uiState.playingSpotId,
+                onBookTrip = onBookTrip,
+                onPlayPreview = onPlayPreview,
+                onStopPreview = onStopPreview
             )
         }
     }
@@ -80,93 +88,168 @@ fun TourPackageDetailScreen(
 @Composable
 private fun TourPackageDetailContent(
     detail: TourPackageDetail,
-    isStartingTrip: Boolean,
-    errorMessage: String?,
-    onStartTrip: () -> Unit,
-    onDownload: (String) -> Unit
+    playingSpotId: String?,
+    onBookTrip: () -> Unit,
+    onPlayPreview: (String, String) -> Unit,
+    onStopPreview: () -> Unit
 ) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        item {
-            AsyncImage(
-                model = detail.heroImageUrl,
-                contentDescription = detail.title,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp),
-                contentScale = ContentScale.Crop
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(detail.title, style = MaterialTheme.typography.headlineMedium)
-            Text(
-                "${detail.region} • ${detail.days} days • ${detail.spots.size} spots",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(detail.overview, style = MaterialTheme.typography.bodyLarge)
-        }
+    val context = LocalContext.current
+    val ttsHelper = remember { PreviewTtsHelper(context) }
 
-        item {
-            Text(stringResource(R.string.route_map), style = MaterialTheme.typography.titleLarge)
-            Spacer(modifier = Modifier.height(8.dp))
-            CuratedSpotsMap(spots = detail.spots)
-        }
+    DisposableEffect(Unit) {
+        onDispose { ttsHelper.shutdown() }
+    }
 
-        item {
-            Text(stringResource(R.string.itinerary_by_day), style = MaterialTheme.typography.titleLarge)
-        }
-
-        val spotsByDay = detail.spots.groupBy { it.day }.toSortedMap()
-        spotsByDay.forEach { (day, spots) ->
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 88.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
             item {
-                Text(stringResource(R.string.day_label, day), style = MaterialTheme.typography.titleMedium)
+                AsyncImage(
+                    model = detail.heroImageUrl,
+                    contentDescription = detail.title,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp),
+                    contentScale = ContentScale.Crop
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(detail.title, style = MaterialTheme.typography.headlineMedium)
+                Text(
+                    "${detail.region} • ${detail.days} days • ${detail.spots.size} spots",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(detail.overview, style = MaterialTheme.typography.bodyLarge)
             }
-            items(spots.sortedBy { it.orderIndex }, key = { it.id }) { spot ->
-                CuratedSpotCard(spot = spot)
-            }
-        }
 
-        if (detail.tips.isNotEmpty()) {
-            item { SectionList(title = stringResource(R.string.tips), items = detail.tips) }
-        }
-        if (detail.essentials.isNotEmpty()) {
-            item { SectionList(title = stringResource(R.string.essentials), items = detail.essentials) }
-        }
-        if (detail.highlights.isNotEmpty()) {
-            item { SectionList(title = stringResource(R.string.highlights), items = detail.highlights) }
-        }
-        if (detail.hotels.isNotEmpty()) {
-            item { NearbySection(title = stringResource(R.string.hotels_nearby), places = detail.hotels) }
-        }
-        if (detail.restaurants.isNotEmpty()) {
-            item { NearbySection(title = stringResource(R.string.local_restaurants), places = detail.restaurants) }
-        }
-
-        item {
-            if (errorMessage != null) {
-                Text(errorMessage, color = MaterialTheme.colorScheme.error)
+            item {
+                Text(stringResource(R.string.route_map), style = MaterialTheme.typography.titleLarge)
+                Spacer(modifier = Modifier.height(8.dp))
+                CuratedSpotsMap(spots = detail.spots)
             }
-            Button(
-                onClick = onStartTrip,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isStartingTrip
-            ) {
-                if (isStartingTrip) {
-                    CircularProgressIndicator()
-                } else {
-                    Text(stringResource(R.string.start_trip))
+
+            if (detail.highlights.isNotEmpty()) {
+                item {
+                    GuideMeCard {
+                        Text(
+                            stringResource(R.string.curator_highlights),
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                        detail.highlights.forEach { highlight ->
+                            Text("• $highlight", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
                 }
             }
-            OutlinedButton(
-                onClick = { onDownload(detail.id) },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isStartingTrip
+
+            item {
+                Text(stringResource(R.string.itinerary_by_day), style = MaterialTheme.typography.titleLarge)
+            }
+
+            val spotsByDay = detail.spots.groupBy { it.day }.toSortedMap()
+            spotsByDay.forEach { (day, spots) ->
+                item {
+                    Text(stringResource(R.string.day_label, day), style = MaterialTheme.typography.titleMedium)
+                    detail.daySummaries[day.toString()]?.let { summary ->
+                        Text(
+                            summary,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                    }
+                }
+                items(spots.sortedBy { it.orderIndex }, key = { it.id }) { spot ->
+                    CuratedSpotCard(spot = spot)
+                }
+            }
+
+            if (detail.tips.isNotEmpty()) {
+                item { SectionList(title = stringResource(R.string.tips), items = detail.tips) }
+            }
+            if (detail.essentials.isNotEmpty()) {
+                item { SectionList(title = stringResource(R.string.essentials), items = detail.essentials) }
+            }
+            if (detail.hotels.isNotEmpty()) {
+                item { NearbySection(title = stringResource(R.string.hotels_nearby), places = detail.hotels) }
+            }
+            if (detail.restaurants.isNotEmpty()) {
+                item { NearbySection(title = stringResource(R.string.local_restaurants), places = detail.restaurants) }
+            }
+
+            val previewSpots = detail.spots.sortedBy { it.orderIndex }.take(3)
+            if (previewSpots.isNotEmpty()) {
+                item {
+                    Text(stringResource(R.string.listen_before_you_go), style = MaterialTheme.typography.titleLarge)
+                }
+                items(previewSpots, key = { "preview-${it.id}" }) { spot ->
+                    AudioPreviewCard(
+                        spot = spot,
+                        isPlaying = playingSpotId == spot.id,
+                        onPlay = {
+                            val script = spot.previewSnippet ?: spot.description
+                            onPlayPreview(spot.id, script)
+                            ttsHelper.speak(script)
+                        },
+                        onStop = {
+                            ttsHelper.stop()
+                            onStopPreview()
+                        }
+                    )
+                }
+            }
+        }
+
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth(),
+            shadowElevation = 8.dp,
+            tonalElevation = 3.dp
+        ) {
+            Button(
+                onClick = onBookTrip,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
-                Text(stringResource(R.string.download_offline_pack))
+                Text(stringResource(R.string.book_trip_free))
+            }
+        }
+    }
+}
+
+@Composable
+private fun AudioPreviewCard(
+    spot: CuratedSpot,
+    isPlaying: Boolean,
+    onPlay: () -> Unit,
+    onStop: () -> Unit
+) {
+    GuideMeCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(spot.name, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    spot.previewSnippet ?: spot.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3
+                )
+            }
+            IconButton(onClick = if (isPlaying) onStop else onPlay) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Default.Stop else Icons.Default.PlayArrow,
+                    contentDescription = if (isPlaying) "Stop preview" else "Play preview"
+                )
             }
         }
     }

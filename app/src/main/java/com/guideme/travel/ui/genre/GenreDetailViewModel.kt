@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import com.guideme.travel.domain.model.TourPackageSummary
 import com.guideme.travel.domain.usecase.GetGenrePackagesUseCase
+import com.guideme.travel.domain.usecase.ObserveGenrePackagesUseCase
 import com.guideme.travel.ui.navigation.GenreDetailRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,12 +20,14 @@ data class GenreDetailUiState(
     val genreName: String = "",
     val packages: List<TourPackageSummary> = emptyList(),
     val isLoading: Boolean = true,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val isOfflineCached: Boolean = false
 )
 
 @HiltViewModel
 class GenreDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
+    private val observeGenrePackagesUseCase: ObserveGenrePackagesUseCase,
     private val getGenrePackagesUseCase: GetGenrePackagesUseCase
 ) : ViewModel() {
 
@@ -39,6 +42,22 @@ class GenreDetailViewModel @Inject constructor(
     private fun loadPackages() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+
+            launch {
+                observeGenrePackagesUseCase(route.countryCode, route.genreId).collect { cached ->
+                    if (cached != null) {
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                genreName = cached.genreName,
+                                packages = cached.packages.sortedBy { p -> p.rank },
+                                isOfflineCached = true
+                            )
+                        }
+                    }
+                }
+            }
+
             runCatching {
                 getGenrePackagesUseCase(route.countryCode, route.genreId)
             }.onSuccess { result ->
@@ -46,14 +65,20 @@ class GenreDetailViewModel @Inject constructor(
                     it.copy(
                         isLoading = false,
                         genreName = result.genreName,
-                        packages = result.packages
+                        packages = result.packages.sortedBy { p -> p.rank },
+                        isOfflineCached = true
                     )
                 }
             }.onFailure { error ->
+                val hasCache = _uiState.value.packages.isNotEmpty()
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        errorMessage = error.message ?: "Failed to load destinations"
+                        errorMessage = if (hasCache) {
+                            null
+                        } else {
+                            error.message ?: "Connect once to download this collection."
+                        }
                     )
                 }
             }

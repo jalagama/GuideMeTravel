@@ -37,7 +37,9 @@ class FirebaseCuratedContentDataSource @Inject constructor(
         return CountryGenres(
             countryCode = data["countryCode"] as? String ?: countryCode,
             countryName = data["countryName"] as? String ?: countryCode,
-            genres = genresRaw.map { parseGenre(it) }
+            genres = genresRaw.map { parseGenre(it) },
+            schemaVersion = (data["schemaVersion"] as? Number)?.toInt() ?: 3,
+            updatedAtMillis = (data["updatedAtMillis"] as? Number)?.toLong() ?: System.currentTimeMillis()
         )
     }
 
@@ -55,7 +57,9 @@ class FirebaseCuratedContentDataSource @Inject constructor(
             countryCode = data["countryCode"] as? String ?: countryCode,
             genreId = data["genreId"] as? String ?: genreId,
             genreName = data["genreName"] as? String ?: genreId,
-            packages = packagesRaw.map { parsePackageSummary(it) }
+            packages = packagesRaw.map { parsePackageSummary(it) },
+            schemaVersion = (data["schemaVersion"] as? Number)?.toInt() ?: 3,
+            updatedAtMillis = (data["updatedAtMillis"] as? Number)?.toLong() ?: System.currentTimeMillis()
         )
     }
 
@@ -120,7 +124,8 @@ class FirebaseCuratedContentDataSource @Inject constructor(
             name = data["name"] as String,
             type = data["type"] as? String ?: "region",
             imageUrl = data["imageUrl"] as? String ?: "",
-            blurb = data["blurb"] as? String ?: ""
+            blurb = data["blurb"] as? String ?: "",
+            rank = (data["rank"] as? Number)?.toInt() ?: 0
         )
     }
 
@@ -131,7 +136,10 @@ class FirebaseCuratedContentDataSource @Inject constructor(
             region = data["region"] as String,
             days = (data["days"] as? Number)?.toInt() ?: 1,
             heroImageUrl = data["heroImageUrl"] as? String ?: "",
-            shortInfo = data["shortInfo"] as? String ?: ""
+            shortInfo = data["shortInfo"] as? String ?: "",
+            rank = (data["rank"] as? Number)?.toInt() ?: 0,
+            bestFor = data["bestFor"] as? String ?: "",
+            seasonality = data["seasonality"] as? String
         )
     }
 
@@ -147,12 +155,14 @@ class FirebaseCuratedContentDataSource @Inject constructor(
             days = (data["days"] as? Number)?.toInt() ?: 1,
             heroImageUrl = data["heroImageUrl"] as? String ?: "",
             overview = data["overview"] as? String ?: "",
+            daySummaries = parseDaySummaries(data["daySummaries"]),
             spots = spotsRaw.mapIndexed { index, spot -> parseSpot(spot, index) },
             tips = parseStringList(data["tips"]),
             essentials = parseStringList(data["essentials"]),
             highlights = parseStringList(data["highlights"]),
             hotels = parseNearbyPlaces(data["hotels"]),
-            restaurants = parseNearbyPlaces(data["restaurants"])
+            restaurants = parseNearbyPlaces(data["restaurants"]),
+            updatedAtMillis = (data["createdAtMillis"] as? Number)?.toLong() ?: System.currentTimeMillis()
         )
     }
 
@@ -167,8 +177,17 @@ class FirebaseCuratedContentDataSource @Inject constructor(
             orderIndex = (data["orderIndex"] as? Number)?.toInt() ?: fallbackIndex,
             day = (data["day"] as? Number)?.toInt() ?: 1,
             whyChosen = data["whyChosen"] as? String,
+            previewSnippet = data["previewSnippet"] as? String,
             estimatedMinutes = (data["estimatedMinutes"] as? Number)?.toInt() ?: 45
         )
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun parseDaySummaries(raw: Any?): Map<String, String> {
+        val map = raw as? Map<String, Any?> ?: return emptyMap()
+        return map.mapNotNull { (key, value) ->
+            value?.toString()?.let { key to it }
+        }.toMap()
     }
 
     private fun parseStringList(raw: Any?): List<String> {

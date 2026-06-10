@@ -13,12 +13,13 @@ export type AttractionDoc = {
   transcript?: string;
   day?: number;
   whyChosen?: string;
+  previewSnippet?: string;
   rating?: number;
   userRatingsTotal?: number;
 };
 
 export const PLACES_RADIUS_METERS = 50000;
-export const CURATED_SCHEMA_VERSION = 2;
+export const CURATED_SCHEMA_VERSION = 3;
 
 type GeocodeLocation = {
   lat: number;
@@ -335,6 +336,58 @@ export function passesQualityGate(spot: AttractionDoc): boolean {
 export function targetSpotCount(days: number): number {
   const scaled = Math.round(days * 4);
   return Math.max(3, Math.min(25, scaled));
+}
+
+export type NearbyPlaceResult = {
+  name: string;
+  description: string;
+  latitude: number;
+  longitude: number;
+  rating?: number;
+};
+
+export async function fetchPlacesNearbyByType(
+  lat: number,
+  lng: number,
+  type: "lodging" | "restaurant",
+  maxResults = 5
+): Promise<NearbyPlaceResult[]> {
+  const mapsKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!mapsKey) return [];
+
+  const placesUrl =
+    `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}` +
+    `&radius=${PLACES_RADIUS_METERS}&type=${type}&key=${mapsKey}`;
+  const placesRes = await fetchWithTimeout(placesUrl);
+  const placesData = await placesRes.json();
+
+  if (placesData.status !== "OK" && placesData.status !== "ZERO_RESULTS") {
+    return [];
+  }
+
+  return (placesData.results ?? [])
+    .filter((place: { rating?: number }) => (place.rating ?? 0) >= 3.5)
+    .sort((a: { rating?: number }, b: { rating?: number }) => (b.rating ?? 0) - (a.rating ?? 0))
+    .slice(0, maxResults)
+    .map((place: {
+      name: string;
+      vicinity?: string;
+      geometry: { location: { lat: number; lng: number } };
+      rating?: number;
+    }) => ({
+      name: place.name,
+      description: place.vicinity ?? (type === "lodging" ? "Hotel" : "Restaurant"),
+      latitude: place.geometry.location.lat,
+      longitude: place.geometry.location.lng,
+      rating: place.rating,
+    }));
+}
+
+export function computeRouteCentroid(spots: AttractionDoc[]): { lat: number; lng: number } | null {
+  if (spots.length === 0) return null;
+  const lat = spots.reduce((sum, s) => sum + s.latitude, 0) / spots.length;
+  const lng = spots.reduce((sum, s) => sum + s.longitude, 0) / spots.length;
+  return { lat, lng };
 }
 
 export function assignDays(spots: AttractionDoc[], days: number): AttractionDoc[] {

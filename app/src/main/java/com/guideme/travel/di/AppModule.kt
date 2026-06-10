@@ -9,12 +9,14 @@ import com.guideme.travel.data.auth.AuthRepositoryImpl
 import com.guideme.travel.data.local.GuideMeDatabase
 import com.guideme.travel.data.location.LocationRepositoryImpl
 import com.guideme.travel.data.preferences.PreferencesRepositoryImpl
+import com.guideme.travel.data.repository.CatalogPrefetchRepositoryImpl
 import com.guideme.travel.data.repository.CuratedContentRepositoryImpl
 import com.guideme.travel.data.repository.GuideRepositoryImpl
 import com.guideme.travel.data.repository.TripRepositoryImpl
 import com.guideme.travel.data.repository.UserRepositoryImpl
 import com.guideme.travel.data.work.DownloadWorkRepositoryImpl
 import com.guideme.travel.domain.repository.AuthRepository
+import com.guideme.travel.domain.repository.CatalogPrefetchRepository
 import com.guideme.travel.domain.repository.CuratedContentRepository
 import com.guideme.travel.domain.repository.DownloadWorkRepository
 import com.guideme.travel.domain.repository.GuideRepository
@@ -42,7 +44,7 @@ object AppModule {
             context,
             GuideMeDatabase::class.java,
             "guideme.db"
-        ).build()
+        ).fallbackToDestructiveMigration().build()
     }
 
     @Provides
@@ -50,6 +52,9 @@ object AppModule {
 
     @Provides
     fun provideAttractionDao(database: GuideMeDatabase) = database.attractionDao()
+
+    @Provides
+    fun provideCuratedContentDao(database: GuideMeDatabase) = database.curatedContentDao()
 
     @Provides
     @Singleton
@@ -107,4 +112,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindCuratedContentRepository(impl: CuratedContentRepositoryImpl): CuratedContentRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindCatalogPrefetchRepository(impl: CatalogPrefetchRepositoryImpl): CatalogPrefetchRepository
 }

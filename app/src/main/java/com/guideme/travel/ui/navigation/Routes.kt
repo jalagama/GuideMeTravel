@@ -28,6 +28,13 @@ data class TourPackageDetailRoute(
 )
 
 @Serializable
+data class BookTripRoute(
+    val packageId: String,
+    val countryCode: String,
+    val genreId: String
+)
+
+@Serializable
 data class ItineraryRoute(val tripId: String)
 
 @Serializable

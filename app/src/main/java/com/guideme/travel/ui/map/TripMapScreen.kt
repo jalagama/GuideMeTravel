@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -34,20 +35,22 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.guideme.travel.domain.model.Attraction
 import com.guideme.travel.domain.model.AttractionStatus
 import com.guideme.travel.domain.model.TripPlan
+import com.guideme.travel.domain.model.toMapPoi
 import com.guideme.travel.ui.components.GuideMeCard
+import com.guideme.travel.ui.components.PoiCategoryIcon
+import com.guideme.travel.ui.components.PoiMapStyle
+import com.guideme.travel.ui.components.addPoiMapLayers
+import com.guideme.travel.ui.components.fitMapToPois
+import com.guideme.travel.ui.components.registerPoiMapIcons
 import com.guideme.travel.util.BatteryOptimizationHelper
 import com.guideme.travel.util.LocationPermissionHelper
-import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.style.layers.CircleLayer
-import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
-import org.maplibre.geojson.FeatureCollection
-import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 
 @Composable
@@ -61,11 +64,10 @@ fun TripMapScreen(
     val trip = uiState.trip ?: return
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val center = trip.attractions.firstOrNull()?.let { LatLng(it.latitude, it.longitude) }
-        ?: LatLng(15.3350, 76.4600)
     val mapView = remember { MapView(context) }
-    val styleUrl = uiState.mapMetadata?.styleUrl ?: uiState.mapStyleUrl
-        ?: "https://demotiles.maplibre.org/style.json"
+    val styleUrl = uiState.mapMetadata?.styleUrl
+        ?: uiState.mapStyleUrl
+        ?: PoiMapStyle.defaultStyleUrl()
 
     DisposableEffect(lifecycleOwner, mapView) {
         val observer = LifecycleEventObserver { _, event ->
@@ -85,14 +87,13 @@ fun TripMapScreen(
         }
     }
 
-    LaunchedEffect(trip.id, styleUrl) {
+    LaunchedEffect(trip.id, styleUrl, uiState.nextAttractionId) {
         mapView.getMapAsync { map ->
             map.setStyle(styleUrl) { style ->
-                addTripMapLayers(style, trip, uiState.nextAttractionId)
-                map.cameraPosition = CameraPosition.Builder()
-                    .target(center)
-                    .zoom(12.0)
-                    .build()
+                val mapPois = trip.attractions.map { it.toMapPoi() }
+                registerPoiMapIcons(context, style)
+                addPoiMapLayers(style, mapPois, uiState.nextAttractionId)
+                fitMapToPois(map, mapPois)
             }
         }
     }
@@ -131,7 +132,7 @@ fun TripMapScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(0.45f)
+                .weight(0.58f)
         ) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
@@ -148,7 +149,7 @@ fun TripMapScreen(
         }
 
         LazyColumn(
-            modifier = Modifier.weight(0.55f),
+            modifier = Modifier.weight(0.42f),
             contentPadding = PaddingValues(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -206,60 +207,6 @@ fun TripMapScreen(
     }
 }
 
-private fun addTripMapLayers(
-    style: org.maplibre.android.maps.Style,
-    trip: TripPlan,
-    nextAttractionId: String?
-) {
-    val sortedAttractions = trip.attractions.sortedBy { it.orderIndex }
-
-    if (sortedAttractions.size >= 2) {
-        val routePoints = sortedAttractions.map { attraction ->
-            Point.fromLngLat(attraction.longitude, attraction.latitude)
-        }
-        val routeSourceId = "trip-route"
-        style.addSource(
-            GeoJsonSource(
-                routeSourceId,
-                Feature.fromGeometry(LineString.fromLngLats(routePoints))
-            )
-        )
-        style.addLayer(
-            LineLayer(routeSourceId + "-layer", routeSourceId).withProperties(
-                PropertyFactory.lineColor("#4285F4"),
-                PropertyFactory.lineWidth(4f),
-                PropertyFactory.lineOpacity(0.85f)
-            )
-        )
-    }
-
-    val features = sortedAttractions.map { attraction ->
-        val color = when {
-            attraction.status == AttractionStatus.VISITED -> "#00A699"
-            attraction.id == nextAttractionId -> "#FF5A5F"
-            else -> "#FFB400"
-        }
-        Feature.fromGeometry(
-            Point.fromLngLat(attraction.longitude, attraction.latitude)
-        ).apply {
-            addStringProperty("markerColor", color)
-        }
-    }
-    val sourceId = "trip-attractions"
-    val layerId = "trip-attractions-layer"
-    style.addSource(GeoJsonSource(sourceId, FeatureCollection.fromFeatures(features)))
-    style.addLayer(
-        CircleLayer(layerId, sourceId).withProperties(
-            PropertyFactory.circleRadius(9f),
-            PropertyFactory.circleColor(
-                org.maplibre.android.style.expressions.Expression.get("markerColor")
-            ),
-            PropertyFactory.circleStrokeWidth(2f),
-            PropertyFactory.circleStrokeColor("#FFFFFF")
-        )
-    )
-}
-
 private fun updateUserLocationLayer(style: org.maplibre.android.maps.Style, lat: Double, lng: Double) {
     val sourceId = "user-location"
     val layerId = "user-location-layer"
@@ -286,21 +233,30 @@ private fun AttractionMapCard(
     isNext: Boolean,
     onPlayGuide: () -> Unit
 ) {
+    val poi = attraction.toMapPoi()
     GuideMeCard {
-        Text(
-            text = "Stop ${attraction.orderIndex + 1}: ${attraction.name}",
-            style = MaterialTheme.typography.titleLarge,
-            color = if (isNext) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-        )
-        Text(
-            text = when (attraction.status) {
-                AttractionStatus.VISITED -> "Visited"
-                AttractionStatus.SKIPPED -> "Skipped"
-                AttractionStatus.PENDING -> if (isNext) "Up next" else "Upcoming"
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            PoiCategoryIcon(category = poi.category, contentDescription = poi.category.name)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = attraction.name,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = if (isNext) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = when (attraction.status) {
+                        AttractionStatus.VISITED -> "Visited"
+                        AttractionStatus.SKIPPED -> "Skipped"
+                        AttractionStatus.PENDING -> if (isNext) "Up next" else "Upcoming"
+                    }
+                )
+                OutlinedButton(onClick = onPlayGuide, modifier = Modifier.fillMaxWidth()) {
+                    Text("Play guide now")
+                }
             }
-        )
-        OutlinedButton(onClick = onPlayGuide, modifier = Modifier.fillMaxWidth()) {
-            Text("Play guide now")
         }
     }
 }

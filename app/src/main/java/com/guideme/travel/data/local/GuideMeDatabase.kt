@@ -15,7 +15,7 @@ import androidx.room.RoomDatabase
         CuratedSpotEntity::class,
         NearbyPlaceEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class GuideMeDatabase : RoomDatabase() {

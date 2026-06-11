@@ -189,8 +189,11 @@ fun GuideMeApp(
                         }
                     },
                     onStartOnline = {
-                        viewModel.bookForOnline { tripId ->
-                            navController.navigate(ItineraryRoute(tripId))
+                        viewModel.bookAndStartOnline { tripId ->
+                            navController.navigate(TripMapRoute(tripId)) {
+                                popUpTo<TourPackageDetailRoute> { inclusive = true }
+                                launchSingleTop = true
+                            }
                         }
                     }
                 )

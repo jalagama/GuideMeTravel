@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -25,7 +24,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,21 +31,18 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.AsyncImage
 import com.guideme.travel.R
 import com.guideme.travel.domain.model.CuratedSpot
+import com.guideme.travel.domain.model.guideScript
 import com.guideme.travel.domain.model.NearbyPlace
 import com.guideme.travel.domain.model.TourPackageDetail
 import com.guideme.travel.ui.components.GuideMeCard
-import com.guideme.travel.ui.components.addCuratedSpotsMapLayers
-import com.guideme.travel.ui.components.curatedMapCenter
+import com.guideme.travel.ui.components.PoiCategoryIcon
+import com.guideme.travel.ui.components.PoiRouteMapSection
+import com.guideme.travel.ui.components.RoutePoiDisplay
+import com.guideme.travel.domain.model.toMapPoi
 import com.guideme.travel.util.PreviewTtsHelper
-import org.maplibre.android.camera.CameraPosition
-import org.maplibre.android.maps.MapView
 
 @Composable
 fun TourPackageDetailScreen(
@@ -129,7 +124,16 @@ private fun TourPackageDetailContent(
             item {
                 Text(stringResource(R.string.route_map), style = MaterialTheme.typography.titleLarge)
                 Spacer(modifier = Modifier.height(8.dp))
-                CuratedSpotsMap(spots = detail.spots)
+                PoiRouteMapSection(
+                    stops = detail.spots.sortedBy { it.orderIndex }.map { spot ->
+                        RoutePoiDisplay(
+                            poi = spot.toMapPoi(),
+                            description = spot.whyChosen ?: spot.description,
+                            estimatedMinutes = spot.estimatedMinutes
+                        )
+                    },
+                    mapHeight = 400.dp
+                )
             }
 
             if (detail.highlights.isNotEmpty()) {
@@ -191,7 +195,7 @@ private fun TourPackageDetailContent(
                         spot = spot,
                         isPlaying = playingSpotId == spot.id,
                         onPlay = {
-                            val script = spot.previewSnippet ?: spot.description
+                            val script = spot.guideScript()
                             onPlayPreview(spot.id, script)
                             ttsHelper.speak(script)
                         },
@@ -239,7 +243,7 @@ private fun AudioPreviewCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(spot.name, style = MaterialTheme.typography.titleMedium)
                 Text(
-                    spot.previewSnippet ?: spot.description,
+                    spot.guideScript(),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 3
@@ -256,66 +260,15 @@ private fun AudioPreviewCard(
 }
 
 @Composable
-private fun CuratedSpotsMap(spots: List<CuratedSpot>) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val mapView = remember { MapView(context) }
-    val styleUrl = "https://demotiles.maplibre.org/style.json"
-
-    DisposableEffect(lifecycleOwner, mapView) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_START -> mapView.onStart()
-                Lifecycle.Event.ON_RESUME -> mapView.onResume()
-                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
-                Lifecycle.Event.ON_STOP -> mapView.onStop()
-                Lifecycle.Event.ON_DESTROY -> mapView.onDestroy()
-                else -> Unit
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            mapView.onDestroy()
-        }
-    }
-
-    LaunchedEffect(spots) {
-        mapView.getMapAsync { map ->
-            map.setStyle(styleUrl) { style ->
-                addCuratedSpotsMapLayers(style, spots)
-                curatedMapCenter(spots)?.let { center ->
-                    map.cameraPosition = CameraPosition.Builder()
-                        .target(center)
-                        .zoom(10.0)
-                        .build()
-                }
-            }
-        }
-    }
-
-    AndroidView(
-        factory = { mapView },
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(220.dp)
-    )
-}
-
-@Composable
 private fun CuratedSpotCard(spot: CuratedSpot) {
+    val poi = spot.toMapPoi()
     GuideMeCard {
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            if (!spot.imageUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = spot.imageUrl,
-                    contentDescription = spot.name,
-                    modifier = Modifier.size(72.dp),
-                    contentScale = ContentScale.Crop
-                )
-            }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            PoiCategoryIcon(category = poi.category, contentDescription = poi.category.name)
             Column(modifier = Modifier.weight(1f)) {
-                Text("Stop ${spot.orderIndex + 1}", style = MaterialTheme.typography.labelLarge)
                 Text(spot.name, style = MaterialTheme.typography.titleMedium)
                 if (!spot.whyChosen.isNullOrBlank()) {
                     Text(

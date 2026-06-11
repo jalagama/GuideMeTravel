@@ -12,7 +12,7 @@ import kotlinx.serialization.json.Json
 
 private val curatedJson = Json { ignoreUnknownKeys = true }
 
-const val CURATED_SCHEMA_VERSION = 3
+const val CURATED_SCHEMA_VERSION = 5
 
 fun CountryGenres.toCacheEntity(schemaVersion: Int = CURATED_SCHEMA_VERSION): CountryGenresCacheEntity {
     return CountryGenresCacheEntity(
@@ -119,6 +119,7 @@ fun CuratedSpot.toEntity(packageId: String): CuratedSpotEntity {
         day = day,
         whyChosen = whyChosen,
         previewSnippet = previewSnippet,
+        transcript = transcript,
         estimatedMinutes = estimatedMinutes
     )
 }
@@ -147,6 +148,7 @@ fun CuratedSpotEntity.toDomain(): CuratedSpot {
         day = day,
         whyChosen = whyChosen,
         previewSnippet = previewSnippet,
+        transcript = transcript,
         estimatedMinutes = estimatedMinutes
     )
 }

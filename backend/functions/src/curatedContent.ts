@@ -25,8 +25,8 @@ import {
   buildPackageExtrasPrompt,
   buildPackagesFillPrompt,
   buildPackagesPrompt,
-  buildPreviewSnippetPrompt,
   buildRestaurantDescriptionPrompt,
+  buildTourGuideTranscriptPrompt,
   buildWhyChosenPrompt,
 } from "./prompts/curatedPrompts";
 import { generateGeminiText } from "./logging/geminiLogging";
@@ -566,16 +566,20 @@ async function generateTourPackageDetail(
       const wiki = await fetchWikipediaSummary(spot.name, "en");
       const description = wiki || spot.description;
       const whyChosen = await generateWhyChosen(spot, summary.title);
-      const previewSnippet = await generatePreviewSnippet(spot.name, description, summary.title);
+      const transcript = await generateTourGuideTranscript(
+        spot.name,
+        description,
+        summary.title,
+        summary.region
+      );
+      const previewSnippet = excerptTranscript(transcript, 75);
       return {
         ...spot,
         orderIndex: index,
         description,
         whyChosen,
         previewSnippet,
-        transcript: wiki
-          ? `Welcome to ${spot.name}. ${wiki}`
-          : `Welcome to ${spot.name}. ${spot.description}`,
+        transcript,
       };
     })
   );
@@ -641,34 +645,66 @@ async function generateWhyChosen(spot: AttractionDoc, packageTitle: string): Pro
   }
 }
 
-async function generatePreviewSnippet(
+function excerptTranscript(transcript: string, maxWords: number): string {
+  const words = transcript.trim().split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) {
+    return transcript.trim();
+  }
+  return `${words.slice(0, maxWords).join(" ")}…`;
+}
+
+async function generateTourGuideTranscript(
   spotName: string,
   description: string,
-  packageTitle: string
+  packageTitle: string,
+  region: string
 ): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
+  const grounded = description.trim();
   if (!apiKey) {
-    return `Discover ${spotName}, a highlight of the ${packageTitle} journey. ${description.slice(0, 120)}`;
+    return [
+      `Welcome — you've arrived at ${spotName}, one of the essential stops on your ${packageTitle} journey.`,
+      grounded,
+      `Take a moment to look around and appreciate why travelers from around the world come to ${region} for this experience.`,
+      "Move at your own pace, stay hydrated, and follow any posted visitor guidelines.",
+    ]
+      .filter(Boolean)
+      .join(" ");
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
   try {
-    const prompt = buildPreviewSnippetPrompt(spotName, description, packageTitle);
-    const responseText = await generateGeminiText("generate_preview_snippet", model, prompt, {
+    const prompt = buildTourGuideTranscriptPrompt(spotName, grounded, packageTitle, region);
+    const responseText = await generateGeminiText("generate_tour_guide_transcript", model, prompt, {
       spotName,
       packageTitle,
     });
-    return responseText.trim();
+    const script = responseText.trim();
+    if (script.split(/\s+/).length >= 120) {
+      return script;
+    }
+    getGuideMeLogger().logFallback("generate_tour_guide_transcript", "script_too_short", {
+      spotName,
+      wordCount: script.split(/\s+/).length,
+    });
   } catch (error) {
-    getGuideMeLogger().logFallback("generate_preview_snippet", "generation_failed", {
+    getGuideMeLogger().logFallback("generate_tour_guide_transcript", "generation_failed", {
       spotName,
       packageTitle,
       error: error instanceof Error ? error.message : "unknown",
     });
-    return `Discover ${spotName} on the ${packageTitle} route.`;
   }
+
+  return [
+    `Welcome to ${spotName}. I'm your guide for this stop on the ${packageTitle} route.`,
+    grounded,
+    `As you explore, notice the details that make ${spotName} a defining landmark of ${region}.`,
+    "Allow at least forty-five minutes here, and check local opening hours if you plan to enter any paid areas.",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 async function generatePackageExtras(

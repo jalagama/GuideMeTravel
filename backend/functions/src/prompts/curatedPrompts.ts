@@ -182,6 +182,56 @@ Ground facts: ${description}
 Conversational, engaging, factual. Do not invent details not in the facts. Plain text only.`;
 }
 
+export const TOUR_GUIDE_PERSONA = `You are a professional, warm, licensed tour guide speaking directly to visitors who just arrived on foot.
+You sound human and knowledgeable — like Rick Steves or a top local guide — never like a marketing brochure.`;
+
+export function buildTourGuideTranscriptPrompt(
+  spotName: string,
+  description: string,
+  packageTitle: string,
+  region: string
+): string {
+  return `${TOUR_GUIDE_PERSONA}
+
+Write a spoken audio guide script for tourists at "${spotName}" (${region}), part of the "${packageTitle}" journey.
+
+LENGTH: 2.5 to 3.5 minutes when read aloud (350–500 words).
+
+STRUCTURE (as flowing prose, not bullet points):
+1. Welcome visitors and orient them — what they are looking at right now.
+2. Historical and cultural context — who built it, when, why it matters.
+3. Specific things to notice — architecture, art, views, or rituals.
+4. One practical visitor tip (timing, dress, etiquette, or best vantage point).
+
+GROUND FACTS (use only these; do not invent dates, names, or claims):
+${description}
+
+RULES:
+- Second person ("you", "look to your left").
+- No bullet points, headings, or stage directions.
+- Plain text only, ready for text-to-speech.
+- If facts are thin, focus on verified significance and what to observe — never fabricate.`;
+}
+
+export function buildAttractionGuideScriptPrompt(
+  attractionName: string,
+  groundedFacts: string,
+  languageCode: string
+): string {
+  return `${TOUR_GUIDE_PERSONA}
+
+Write a spoken audio guide script for a tourist arriving at "${attractionName}".
+Language: ${languageCode === "en" ? "English" : languageCode}.
+
+LENGTH: 2.5 to 3.5 minutes when read aloud (350–500 words).
+
+GROUND FACTS (use only these):
+${groundedFacts}
+
+Sound like a real tour guide on the ground. Second person. No bullet points. Plain text only.
+Do not invent details not supported by the facts.`;
+}
+
 export function buildPackageExtrasPrompt(
   summaryTitle: string,
   region: string,

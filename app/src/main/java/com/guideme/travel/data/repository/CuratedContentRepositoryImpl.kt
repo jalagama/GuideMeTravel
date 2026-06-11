@@ -73,7 +73,7 @@ class CuratedContentRepositoryImpl @Inject constructor(
         countryCode: String,
         genreId: String
     ): TourPackageDetail {
-        val cached = localDataSource.observeTourPackageDetail(packageId).firstOrNull()
+        val cached = localDataSource.getTourPackageDetailIfFresh(packageId)
         if (cached != null) {
             logger.logCacheHit("tourPackageDetail", packageId, mapOf("spotCount" to cached.spots.size))
             return cached
@@ -180,7 +180,9 @@ class CuratedContentRepositoryImpl @Inject constructor(
                 imageUrl = spot.imageUrl,
                 orderIndex = spot.orderIndex,
                 estimatedMinutes = spot.estimatedMinutes,
-                transcript = spot.previewSnippet ?: "Welcome to ${spot.name}. ${spot.description}"
+                transcript = spot.transcript?.takeIf { it.isNotBlank() }
+                    ?: spot.description.takeIf { it.isNotBlank() }
+                    ?: "Welcome to ${spot.name}."
             )
         }
         val offlinePackSizeMb = (attractions.size * 2.5 + 45).toInt()

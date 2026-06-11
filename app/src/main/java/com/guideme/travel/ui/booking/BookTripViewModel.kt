@@ -13,6 +13,7 @@ import com.guideme.travel.domain.logging.LogTags
 import com.guideme.travel.domain.usecase.ObserveDefaultLanguageUseCase
 import com.guideme.travel.domain.usecase.ObserveTourPackageDetailUseCase
 import com.guideme.travel.domain.usecase.StartTripFromPackageUseCase
+import com.guideme.travel.domain.usecase.StartTripUseCase
 import com.guideme.travel.ui.navigation.BookTripRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,6 +39,7 @@ class BookTripViewModel @Inject constructor(
     private val observeTourPackageDetailUseCase: ObserveTourPackageDetailUseCase,
     private val startTripFromPackageUseCase: StartTripFromPackageUseCase,
     private val observeDefaultLanguageUseCase: ObserveDefaultLanguageUseCase,
+    private val startTripUseCase: StartTripUseCase,
     private val logger: GuideMeLogger
 ) : ViewModel() {
 
@@ -69,6 +71,55 @@ class BookTripViewModel @Inject constructor(
 
     fun bookForOnline(onSuccess: (String) -> Unit) {
         bookTrip(preferLocal = true, onSuccess)
+    }
+
+    fun bookAndStartOnline(onSuccess: (String) -> Unit) {
+        viewModelScope.launch {
+            logger.info(
+                LogTags.BOOK_TRIP_VM,
+                AnalyticsEvents.BOOK_TRIP_STARTED,
+                mapOf(
+                    AnalyticsParams.PACKAGE_ID to route.packageId,
+                    AnalyticsParams.PREFER_LOCAL to true,
+                    "autoStart" to true
+                )
+            )
+            _uiState.update { it.copy(isBooking = true, errorMessage = null) }
+            val language = observeDefaultLanguageUseCase().first()
+            runCatching {
+                val trip = startTripFromPackageUseCase(
+                    packageId = route.packageId,
+                    countryCode = route.countryCode,
+                    genreId = route.genreId,
+                    origin = "Current location",
+                    languageCode = language,
+                    preferLocal = true
+                )
+                startTripUseCase(trip.id)
+                trip.id
+            }.onSuccess { tripId ->
+                logger.info(
+                    LogTags.BOOK_TRIP_VM,
+                    AnalyticsEvents.BOOK_TRIP_COMPLETE,
+                    mapOf(AnalyticsParams.TRIP_ID to tripId, AnalyticsParams.PACKAGE_ID to route.packageId)
+                )
+                _uiState.update { it.copy(isBooking = false) }
+                onSuccess(tripId)
+            }.onFailure { error ->
+                logger.error(
+                    LogTags.BOOK_TRIP_VM,
+                    AnalyticsEvents.BOOK_TRIP_FAILED,
+                    mapOf(AnalyticsParams.PACKAGE_ID to route.packageId),
+                    error
+                )
+                _uiState.update {
+                    it.copy(
+                        isBooking = false,
+                        errorMessage = error.message ?: "Failed to start trip"
+                    )
+                }
+            }
+        }
     }
 
     private fun bookTrip(preferLocal: Boolean, onSuccess: (String) -> Unit) {

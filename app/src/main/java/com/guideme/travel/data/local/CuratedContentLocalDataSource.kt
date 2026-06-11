@@ -6,6 +6,7 @@ import com.guideme.travel.domain.model.GenrePackages
 import com.guideme.travel.domain.model.TourPackageDetail
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -45,6 +46,21 @@ class CuratedContentLocalDataSource @Inject constructor(
                 updatedAtMillis = cache.updatedAtMillis
             )
         }
+    }
+
+    suspend fun getTourPackageDetailIfFresh(packageId: String): TourPackageDetail? {
+        val detail = dao.observePackageDetailEntity(packageId).first() ?: return null
+        if (detail.schemaVersion < CURATED_SCHEMA_VERSION) {
+            return null
+        }
+        val spots = dao.observeSpotsForPackage(packageId).first()
+        if (spots.isEmpty()) {
+            return null
+        }
+        val nearby = dao.observeNearbyPlaces(packageId).first()
+        val hotels = nearby.filter { it.placeType == "hotel" }.map { it.toDomain() }
+        val restaurants = nearby.filter { it.placeType == "restaurant" }.map { it.toDomain() }
+        return detail.toDomain(spots.map { it.toDomain() }, hotels, restaurants)
     }
 
     fun observeTourPackageDetail(packageId: String): Flow<TourPackageDetail?> {

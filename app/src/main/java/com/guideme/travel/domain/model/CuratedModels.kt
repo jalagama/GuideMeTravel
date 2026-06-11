@@ -49,6 +49,7 @@ data class CuratedSpot(
     val day: Int,
     val whyChosen: String?,
     val previewSnippet: String? = null,
+    val transcript: String? = null,
     val estimatedMinutes: Int = 45
 )
 
@@ -78,6 +79,13 @@ data class TourPackageDetail(
     val restaurants: List<NearbyPlace>,
     val updatedAtMillis: Long = 0L
 )
+
+fun CuratedSpot.guideScript(): String {
+    return transcript?.takeIf { it.isNotBlank() }
+        ?: previewSnippet?.takeIf { it.isNotBlank() }
+        ?: description.takeIf { it.isNotBlank() }
+        ?: "Welcome to $name."
+}
 
 data class TripOffering(
     val packageId: String,

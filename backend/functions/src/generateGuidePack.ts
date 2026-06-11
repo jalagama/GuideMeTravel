@@ -7,6 +7,7 @@ import { fetchWikipediaSummary } from "./wikipedia";
 import { getVoiceForLanguage } from "./ttsVoices";
 import { generateGeminiText } from "./logging/geminiLogging";
 import { getGuideMeLogger } from "./logging/loggerContext";
+import { buildAttractionGuideScriptPrompt } from "./prompts/curatedPrompts";
 import {
   runWithConcurrency,
   validateLanguageCode,
@@ -175,12 +176,11 @@ async function buildGuideScript(
     try {
       const genAI = new GoogleGenerativeAI(apiKey);
       const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-      const prompt = `
-Write a 90-second engaging audio guide script for a tourist arriving at ${attraction.name}.
-Use only these facts:
-${groundedFacts}
-Keep it conversational and factual. Do not invent details.
-`;
+      const prompt = buildAttractionGuideScriptPrompt(
+        attraction.name,
+        groundedFacts,
+        languageCode
+      );
       script = (
         await generateGeminiText("build_guide_script", model, prompt, {
           attraction: attraction.name,

@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
@@ -24,16 +23,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.guideme.travel.R
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import coil.compose.AsyncImage
 import com.guideme.travel.domain.model.Attraction
+import com.guideme.travel.domain.model.toMapPoi
 import com.guideme.travel.ui.components.GuideMeCard
+import com.guideme.travel.ui.components.PoiCategoryIcon
+import com.guideme.travel.ui.components.PoiRouteMapSection
+import com.guideme.travel.ui.components.RoutePoiDisplay
 import com.guideme.travel.util.LocationPermissionHelper
 
 @Composable
@@ -132,6 +133,21 @@ fun ItineraryScreen(
                 }
             }
 
+            item {
+                Text(stringResource(R.string.route_map), style = MaterialTheme.typography.titleLarge)
+                Spacer(modifier = Modifier.height(8.dp))
+                PoiRouteMapSection(
+                    stops = trip.attractions.sortedBy { it.orderIndex }.map { attraction ->
+                        RoutePoiDisplay(
+                            poi = attraction.toMapPoi(),
+                            description = attraction.description,
+                            estimatedMinutes = attraction.estimatedMinutes
+                        )
+                    },
+                    mapHeight = 400.dp
+                )
+            }
+
             items(trip.attractions, key = { it.id }) { attraction ->
                 AttractionTimelineCard(attraction = attraction)
             }
@@ -184,16 +200,14 @@ fun ItineraryScreen(
 
 @Composable
 private fun AttractionTimelineCard(attraction: Attraction) {
+    val poi = attraction.toMapPoi()
     GuideMeCard {
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            AsyncImage(
-                model = attraction.imageUrl,
-                contentDescription = attraction.name,
-                modifier = Modifier.size(88.dp),
-                contentScale = ContentScale.Crop
-            )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            PoiCategoryIcon(category = poi.category, contentDescription = poi.category.name)
             Column(modifier = Modifier.weight(1f)) {
-                Text("Stop ${attraction.orderIndex + 1}", style = MaterialTheme.typography.labelLarge)
                 Text(attraction.name, style = MaterialTheme.typography.titleLarge)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(

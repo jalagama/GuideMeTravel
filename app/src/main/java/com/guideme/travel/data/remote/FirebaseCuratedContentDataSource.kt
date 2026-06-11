@@ -210,6 +210,7 @@ class FirebaseCuratedContentDataSource @Inject constructor(
             day = (data["day"] as? Number)?.toInt() ?: 1,
             whyChosen = data["whyChosen"] as? String,
             previewSnippet = data["previewSnippet"] as? String,
+            transcript = data["transcript"] as? String,
             estimatedMinutes = (data["estimatedMinutes"] as? Number)?.toInt() ?: 45
         )
     }

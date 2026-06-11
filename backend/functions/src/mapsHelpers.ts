@@ -24,7 +24,7 @@ export type AttractionDoc = {
 };
 
 export const PLACES_RADIUS_METERS = 50000;
-export const CURATED_SCHEMA_VERSION = 4;
+export const CURATED_SCHEMA_VERSION = 5;
 
 type RawPlaceResult = {
   place_id: string;

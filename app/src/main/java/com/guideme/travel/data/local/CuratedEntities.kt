@@ -89,6 +89,7 @@ data class CuratedSpotEntity(
     val day: Int,
     val whyChosen: String?,
     val previewSnippet: String?,
+    val transcript: String?,
     val estimatedMinutes: Int
 )
 

@@ -20,6 +20,7 @@ import {
 import { buildSpotsPrompt } from "./prompts/curatedPrompts";
 import { generateGeminiText } from "./logging/geminiLogging";
 import { getGuideMeLogger } from "./logging/loggerContext";
+import { GEMINI_MODEL } from "./geminiConfig";
 
 type GeminiSpot = AttractionDoc & { rank?: number; significance?: string };
 
@@ -160,7 +161,7 @@ async function fetchExpertGeminiSpots(
   if (!apiKey) return [];
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
   const prompt = buildSpotsPrompt(destination, region, countryName, countryCode, maxResults);
 
   const maxAttempts = 2;

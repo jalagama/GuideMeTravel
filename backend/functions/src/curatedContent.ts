@@ -31,6 +31,7 @@ import {
 } from "./prompts/curatedPrompts";
 import { generateGeminiText } from "./logging/geminiLogging";
 import { getGuideMeLogger } from "./logging/loggerContext";
+import { GEMINI_MODEL } from "./geminiConfig";
 
 type GenreDoc = {
   id: string;
@@ -291,7 +292,7 @@ async function generateGenresWithGemini(countryName: string, countryCode: string
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
   try {
     const prompt = buildGenresPrompt(countryName, countryCode);
@@ -344,7 +345,7 @@ async function generatePackagesWithGemini(
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
   try {
     let rawPackages = await fetchPackagesFromGemini(model, countryName, countryCode, genre);
@@ -621,7 +622,7 @@ async function generateWhyChosen(spot: AttractionDoc, packageTitle: string): Pro
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
   try {
     const prompt = buildWhyChosenPrompt(
@@ -673,7 +674,7 @@ async function generateTourGuideTranscript(
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
   try {
     const prompt = buildTourGuideTranscriptPrompt(spotName, grounded, packageTitle, region);
@@ -751,7 +752,7 @@ async function generatePackageExtras(
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
   try {
     const prompt = buildPackageExtrasPrompt(
@@ -803,7 +804,7 @@ async function fetchVerifiedHotels(
   const places = await fetchPlacesNearbyByType(lat, lng, "lodging", 5);
   const apiKey = process.env.GEMINI_API_KEY;
   const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
-  const model = genAI?.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = genAI?.getGenerativeModel({ model: GEMINI_MODEL });
 
   return Promise.all(
     places.map(async (place) => {
@@ -844,7 +845,7 @@ async function fetchVerifiedRestaurants(
   const places = await fetchPlacesNearbyByType(lat, lng, "restaurant", 5);
   const apiKey = process.env.GEMINI_API_KEY;
   const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
-  const model = genAI?.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = genAI?.getGenerativeModel({ model: GEMINI_MODEL });
 
   return Promise.all(
     places.map(async (place) => {

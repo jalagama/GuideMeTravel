@@ -8,6 +8,7 @@ import { getVoiceForLanguage } from "./ttsVoices";
 import { generateGeminiText } from "./logging/geminiLogging";
 import { getGuideMeLogger } from "./logging/loggerContext";
 import { buildAttractionGuideScriptPrompt } from "./prompts/curatedPrompts";
+import { GEMINI_MODEL } from "./geminiConfig";
 import {
   runWithConcurrency,
   validateLanguageCode,
@@ -175,7 +176,7 @@ async function buildGuideScript(
   if (apiKey) {
     try {
       const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+      const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
       const prompt = buildAttractionGuideScriptPrompt(
         attraction.name,
         groundedFacts,

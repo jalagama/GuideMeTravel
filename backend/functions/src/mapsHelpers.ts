@@ -24,7 +24,7 @@ export type AttractionDoc = {
 };
 
 export const PLACES_RADIUS_METERS = 50000;
-export const CURATED_SCHEMA_VERSION = 5;
+export const CURATED_SCHEMA_VERSION = 6;
 
 type RawPlaceResult = {
   place_id: string;
@@ -41,7 +41,42 @@ type GeocodeLocation = {
   lat: number;
   lng: number;
   formattedAddress?: string;
+  adminArea?: string;
 };
+
+export function adminAreaFromGeocodeResult(result: {
+  address_components?: Array<{ long_name: string; types?: string[] }>;
+}): string | undefined {
+  const state = result.address_components?.find((component) =>
+    component.types?.includes("administrative_area_level_1")
+  );
+  if (state?.long_name) {
+    return state.long_name;
+  }
+  const region = result.address_components?.find((component) =>
+    component.types?.includes("administrative_area_level_2")
+  );
+  if (region?.long_name) {
+    return region.long_name;
+  }
+  const locality = result.address_components?.find((component) =>
+    component.types?.includes("locality")
+  );
+  return locality?.long_name;
+}
+
+export function hasValidCoordinates(spot: {
+  latitude: number;
+  longitude: number;
+}): boolean {
+  return (
+    Number.isFinite(spot.latitude) &&
+    Number.isFinite(spot.longitude) &&
+    Math.abs(spot.latitude) <= 90 &&
+    Math.abs(spot.longitude) <= 180 &&
+    !(spot.latitude === 0 && spot.longitude === 0)
+  );
+}
 
 export function slugify(value: string): string {
   return value
@@ -122,10 +157,12 @@ async function geocodeDestinationRaw(
 
   const result = geocodeData.results[0];
   const location = result.geometry.location;
+  const adminArea = adminAreaFromGeocodeResult(result);
   return {
     lat: location.lat,
     lng: location.lng,
     formattedAddress: result.formatted_address,
+    adminArea,
   };
 }
 

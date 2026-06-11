@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildGeminiRankMap,
+  enrichGeminiWithPlacesMetadata,
   isCommercialAttraction,
   mergeAttractionLists,
   namesLikelyMatch,
   rankCuratedAttractions,
+  selectEditorialAttractions,
 } from "./attractionCuration";
 import type { AttractionDoc } from "./mapsHelpers";
 
@@ -114,4 +116,104 @@ test("rankCuratedAttractions prioritizes gemini rank over places noise", () => {
   assert.equal(ranked.length, 2);
   assert.equal(ranked[0].name, "Basilica of Bom Jesus");
   assert.equal(ranked[1].name, "Fort Aguada");
+});
+
+test("selectEditorialAttractions keeps only Gemini picks in rank order", () => {
+  const geminiSpots: AttractionDoc[] = [
+    {
+      id: "virupaksha",
+      name: "Virupaksha Temple",
+      description: "UNESCO centerpiece",
+      latitude: 15.3357,
+      longitude: 76.4606,
+      orderIndex: 0,
+      estimatedMinutes: 90,
+    },
+    {
+      id: "vittala",
+      name: "Vijaya Vittala Temple",
+      description: "Stone chariot",
+      latitude: 15.3352,
+      longitude: 76.4755,
+      orderIndex: 1,
+      estimatedMinutes: 120,
+    },
+  ];
+
+  const placesNoise: AttractionDoc[] = [
+    {
+      id: "sunset",
+      name: "Sunset Point",
+      description: "Popular tourist attraction",
+      latitude: 15.33,
+      longitude: 76.46,
+      orderIndex: 0,
+      estimatedMinutes: 45,
+      rating: 4.9,
+      userRatingsTotal: 12000,
+    },
+    {
+      id: "museum",
+      name: "Hampi Archaeological Museum",
+      description: "Museum",
+      latitude: 15.32,
+      longitude: 76.47,
+      orderIndex: 1,
+      estimatedMinutes: 60,
+      rating: 4.5,
+      userRatingsTotal: 8000,
+    },
+  ];
+
+  const geminiRanks = buildGeminiRankMap([
+    { name: "Virupaksha Temple", rank: 1 },
+    { name: "Vijaya Vittala Temple", rank: 2 },
+  ]);
+
+  const selected = selectEditorialAttractions(geminiSpots, {
+    geminiRanks,
+    targetCount: 8,
+    minCount: 2,
+    fallbackSpots: placesNoise,
+  });
+
+  assert.equal(selected.length, 2);
+  assert.equal(selected[0].name, "Virupaksha Temple");
+  assert.equal(selected[1].name, "Vijaya Vittala Temple");
+});
+
+test("enrichGeminiWithPlacesMetadata borrows coordinates without adding candidates", () => {
+  const enriched = enrichGeminiWithPlacesMetadata(
+    [
+      {
+        id: "vittala",
+        name: "Vijaya Vittala Temple",
+        description: "Stone chariot",
+        latitude: 0,
+        longitude: 0,
+        orderIndex: 0,
+        estimatedMinutes: 120,
+      },
+    ],
+    [
+      {
+        id: "places-vittala",
+        name: "Vittala Temple",
+        description: "Popular tourist attraction",
+        latitude: 15.3352,
+        longitude: 76.4755,
+        orderIndex: 0,
+        estimatedMinutes: 60,
+        imageUrl: "https://example.com/vittala.jpg",
+        rating: 4.8,
+        userRatingsTotal: 15000,
+      },
+    ]
+  );
+
+  assert.equal(enriched.length, 1);
+  assert.equal(enriched[0].latitude, 15.3352);
+  assert.equal(enriched[0].longitude, 76.4755);
+  assert.equal(enriched[0].imageUrl, "https://example.com/vittala.jpg");
+  assert.equal(enriched[0].userRatingsTotal, 15000);
 });

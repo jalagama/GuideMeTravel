@@ -1,4 +1,6 @@
 import type { AttractionDoc } from "./mapsHelpers";
+import { hasValidCoordinates } from "./mapsHelpers";
+import { getGuideMeLogger } from "./logging/loggerContext";
 
 /** Commercial / low-value place names — not curated itinerary stops. */
 const COMMERCIAL_NAME_PATTERNS =
@@ -275,4 +277,84 @@ export function buildGeminiRankMap(
     ranks.set(spot.name, spot.rank ?? index + 1);
   });
   return ranks;
+}
+
+/** Attach Google Places metadata to editorial picks without adding new candidates. */
+export function enrichGeminiWithPlacesMetadata(
+  geminiSpots: AttractionDoc[],
+  placesSpots: AttractionDoc[]
+): AttractionDoc[] {
+  return geminiSpots.map((spot) => {
+    const match = placesSpots.find((place) => namesLikelyMatch(place.name, spot.name));
+    if (!match) {
+      return spot;
+    }
+
+    const enriched: AttractionDoc = {
+      ...spot,
+      imageUrl: spot.imageUrl ?? match.imageUrl,
+      rating: Math.max(spot.rating ?? 0, match.rating ?? 0) || undefined,
+      userRatingsTotal:
+        Math.max(spot.userRatingsTotal ?? 0, match.userRatingsTotal ?? 0) || undefined,
+    };
+
+    if (!hasValidCoordinates(spot) && hasValidCoordinates(match)) {
+      enriched.latitude = match.latitude;
+      enriched.longitude = match.longitude;
+    }
+
+    return enriched;
+  });
+}
+
+/**
+ * Select only editorial (Gemini) attractions in rank order.
+ * Google Places candidates are used only when Gemini returns nothing usable.
+ */
+export function selectEditorialAttractions(
+  geminiSpots: AttractionDoc[],
+  options: {
+    geminiRanks: Map<string, number>;
+    targetCount: number;
+    minCount?: number;
+    fallbackSpots?: AttractionDoc[];
+    placeTypesById?: Map<string, string[]>;
+  }
+): AttractionDoc[] {
+  const { geminiRanks, targetCount, minCount = 3, fallbackSpots, placeTypesById } = options;
+
+  const editorial = geminiSpots
+    .filter((spot) => hasValidCoordinates(spot))
+    .filter((spot) => {
+      const types = placeTypesById?.get(spot.id) ?? [];
+      return !isCommercialAttraction(spot.name, types, spot.description);
+    })
+    .sort((a, b) => {
+      const rankA = findGeminiRank(a.name, geminiRanks) ?? 999;
+      const rankB = findGeminiRank(b.name, geminiRanks) ?? 999;
+      return rankA - rankB;
+    });
+
+  if (editorial.length > 0) {
+    return editorial.slice(0, targetCount);
+  }
+
+  if (!fallbackSpots?.length) {
+    return [];
+  }
+
+  getGuideMeLogger().warn("editorial_attractions_gemini_empty_using_places_fallback", {
+    targetCount,
+    fallbackCount: fallbackSpots.length,
+  });
+
+  return rankCuratedAttractions(
+    fallbackSpots.filter((spot) => hasValidCoordinates(spot)),
+    {
+      geminiRanks,
+      placeTypesById,
+      targetCount,
+      minCount,
+    }
+  );
 }

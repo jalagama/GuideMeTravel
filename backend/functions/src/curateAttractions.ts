@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { HttpsError } from "firebase-functions/v2/https";
 import {
   buildGeminiRankMap,
@@ -9,7 +8,6 @@ import {
 import {
   AttractionDoc,
   countryNameFromCode,
-  extractJsonArray,
   fetchCuratedPlacesAttractionsInCountry,
   geocodeAttractionInCountry,
   geocodeDestinationInCountry,
@@ -18,9 +16,8 @@ import {
   slugify,
 } from "./mapsHelpers";
 import { buildSpotsPrompt } from "./prompts/curatedPrompts";
-import { generateGeminiText } from "./logging/geminiLogging";
 import { getGuideMeLogger } from "./logging/loggerContext";
-import { GEMINI_MODEL } from "./geminiConfig";
+import { generateGeminiJson, hasGeminiApiKey } from "./geminiClient";
 
 type GeminiSpot = AttractionDoc & { rank?: number; significance?: string };
 
@@ -57,10 +54,13 @@ export async function curateDestinationAttractions(input: {
       region,
       countryCode: input.countryCode,
       operationPrefix: input.operationPrefix,
+      hasGeminiApiKey: hasGeminiApiKey(),
     });
     throw new HttpsError(
       "unavailable",
-      `Could not curate expert attractions for "${input.destination}" right now. Please try again shortly.`
+      hasGeminiApiKey()
+        ? `Could not curate expert attractions for "${input.destination}" right now. Please try again shortly.`
+        : "AI curation is not configured on the server. Contact support."
     );
   }
 
@@ -157,34 +157,27 @@ async function fetchExpertGeminiSpots(
   maxResults: number,
   operationPrefix: string
 ): Promise<GeminiSpot[]> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return [];
+  if (!hasGeminiApiKey()) {
+    getGuideMeLogger().error("expert_spots_missing_api_key", {
+      destination,
+      countryCode,
+      operationPrefix,
+    });
+    return [];
+  }
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
   const prompt = buildSpotsPrompt(destination, region, countryName, countryCode, maxResults);
-
   const maxAttempts = 2;
+  let lastError: unknown;
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const responseText = await generateGeminiText(
+      const parsed = await generateGeminiJson<GeminiSpot[]>(
         `${operationPrefix}_expert_spots`,
-        model,
         prompt,
         { destination, region, countryCode, maxResults, attempt }
       );
-      const parsed = JSON.parse(extractJsonArray(responseText)) as GeminiSpot[];
-      const spots = parsed
-        .filter((item) => item && typeof item.name === "string" && item.name.trim().length > 0)
-        .slice(0, maxResults)
-        .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999))
-        .map((item, index) => ({
-          ...item,
-          id: item.id || slugify(item.name),
-          orderIndex: index,
-          estimatedMinutes: item.estimatedMinutes ?? 60,
-          description: item.significance || item.description || item.name,
-        }));
+      const spots = normalizeGeminiSpots(parsed, maxResults);
       if (spots.length > 0) {
         return spots;
       }
@@ -194,6 +187,7 @@ async function fetchExpertGeminiSpots(
         attempt,
       });
     } catch (error) {
+      lastError = error;
       getGuideMeLogger().error("expert_spots_failed", {
         destination,
         countryCode,
@@ -203,7 +197,33 @@ async function fetchExpertGeminiSpots(
     }
   }
 
+  if (lastError) {
+    getGuideMeLogger().error("expert_spots_exhausted", {
+      destination,
+      countryCode,
+      error: lastError instanceof Error ? lastError.message : String(lastError),
+    });
+  }
+
   return [];
+}
+
+function normalizeGeminiSpots(items: GeminiSpot[] | null | undefined, maxResults: number): GeminiSpot[] {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items
+    .filter((item) => item && typeof item.name === "string" && item.name.trim().length > 0)
+    .slice(0, maxResults)
+    .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999))
+    .map((item, index) => ({
+      ...item,
+      id: item.id || slugify(item.name),
+      orderIndex: index,
+      estimatedMinutes: item.estimatedMinutes ?? 60,
+      description: item.significance || item.description || item.name,
+    }));
 }
 
 async function enrichGeminiSpotsWithCoordinates(

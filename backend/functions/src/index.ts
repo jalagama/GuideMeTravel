@@ -15,6 +15,20 @@ import { logEvent, toHttpsError, validateLanguageCode } from "./utils";
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
 const googleMapsApiKey = defineSecret("GOOGLE_MAPS_API_KEY");
 
+function bindGeminiSecret(): void {
+  process.env.GEMINI_API_KEY = geminiApiKey.value();
+}
+
+function bindMapsSecret(): void {
+  process.env.GOOGLE_MAPS_API_KEY = googleMapsApiKey.value();
+}
+
+/** Bind Firebase secrets into process.env for shared backend modules. */
+function bindCallableSecrets(): void {
+  bindGeminiSecret();
+  bindMapsSecret();
+}
+
 export const generateItinerary = onCall(
   {
     region: "asia-south1",
@@ -24,6 +38,8 @@ export const generateItinerary = onCall(
     invoker: "public",
   },
   async (request) => {
+    bindCallableSecrets();
+
     if (!request.auth) {
       console.error("generateItinerary rejected: missing Firebase Auth token", {
         hasAppCheck: Boolean(request.app),
@@ -80,6 +96,8 @@ export const generateGuidePack = onCall(
     invoker: "public",
   },
   async (request) => {
+    bindGeminiSecret();
+
     if (!request.auth) {
       throw new HttpsError(
         "unauthenticated",
@@ -123,6 +141,8 @@ export const getCountryGenres = onCall(
     invoker: "public",
   },
   async (request) => {
+    bindCallableSecrets();
+
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
@@ -152,6 +172,8 @@ export const getGenrePackages = onCall(
     invoker: "public",
   },
   async (request) => {
+    bindCallableSecrets();
+
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
@@ -182,6 +204,8 @@ export const getTourPackageDetail = onCall(
     invoker: "public",
   },
   async (request) => {
+    bindCallableSecrets();
+
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
@@ -212,6 +236,8 @@ export const createTripFromPackage = onCall(
     invoker: "public",
   },
   async (request) => {
+    bindCallableSecrets();
+
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Authentication required.");
     }

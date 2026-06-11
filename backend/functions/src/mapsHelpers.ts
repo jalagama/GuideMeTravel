@@ -86,17 +86,23 @@ export function slugify(value: string): string {
 }
 
 export function extractJsonArray(text: string): string {
-  const start = text.indexOf("[");
-  const end = text.lastIndexOf("]");
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    return fenced[1].trim();
+  }
+
+  const start = trimmed.indexOf("[");
+  const end = trimmed.lastIndexOf("]");
   if (start >= 0 && end > start) {
-    return text.slice(start, end + 1);
+    return trimmed.slice(start, end + 1);
   }
-  const objStart = text.indexOf("{");
-  const objEnd = text.lastIndexOf("}");
+  const objStart = trimmed.indexOf("{");
+  const objEnd = trimmed.lastIndexOf("}");
   if (objStart >= 0 && objEnd > objStart) {
-    return text.slice(objStart, objEnd + 1);
+    return trimmed.slice(objStart, objEnd + 1);
   }
-  return text;
+  return trimmed;
 }
 
 export function countryNameFromCode(countryCode: string): string {

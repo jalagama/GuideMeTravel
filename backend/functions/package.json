@@ -9,6 +9,8 @@
   "scripts": {
     "build": "tsc",
     "test": "npm run build && node --test lib/logging/GuideMeLogger.test.js lib/attractionCuration.test.js",
+    "smoke:gemini": "npm run build && node lib/scripts/smokeGemini.js",
+    "smoke:gemini:cache": "npm run build --cache ./.npm-cache && node lib/scripts/smokeGemini.js",
     "serve": "npm run build && firebase emulators:start --only functions,firestore",
     "deploy": "firebase deploy --only functions,firestore,storage"
   },

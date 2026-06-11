@@ -12,17 +12,13 @@ import {
   computeRouteCentroid,
   countryNameFromCode,
   CURATED_SCHEMA_VERSION,
-  dedupeNearbySpots,
   extractJsonArray,
-  fetchPlacesAttractionsInCountry,
   fetchPlacesNearbyByType,
   geocodeDestinationInCountry,
-  optimizeRoute,
-  passesQualityGate,
-  qualityScore,
   slugify,
   targetSpotCount,
 } from "./mapsHelpers";
+import { curateDestinationAttractions } from "./curateAttractions";
 import {
   buildGenresPrompt,
   buildHotelDescriptionPrompt,
@@ -31,7 +27,6 @@ import {
   buildPackagesPrompt,
   buildPreviewSnippetPrompt,
   buildRestaurantDescriptionPrompt,
-  buildSpotsPrompt,
   buildWhyChosenPrompt,
 } from "./prompts/curatedPrompts";
 import { generateGeminiText } from "./logging/geminiLogging";
@@ -86,8 +81,8 @@ type TourPackageDetailDoc = {
   createdAtMillis: number;
 };
 
-const TARGET_PACKAGE_COUNT = 20;
-const MIN_PACKAGE_COUNT = 15;
+const TARGET_PACKAGE_COUNT = 30;
+const MIN_PACKAGE_COUNT = 25;
 
 export async function getCountryGenres(countryCode: string) {
   const normalized = countryCode.trim().toUpperCase();
@@ -549,26 +544,21 @@ async function generateTourPackageDetail(
   const days = summary.days;
   const targetCount = targetSpotCount(days);
 
-  const destinationQuery = `${summary.title}, ${summary.region}, ${countryName}`;
-  let candidates = await fetchPlacesAttractionsInCountry(destinationQuery, countryCode, 40);
-  if (candidates.length < 3) {
-    candidates = await fetchGeminiSpots(destinationQuery, countryName, countryCode, targetCount);
-  }
-
-  let curated = dedupeNearbySpots(
-    candidates
-      .filter(passesQualityGate)
-      .sort((a, b) => qualityScore(b) - qualityScore(a))
-      .slice(0, targetCount)
-  );
+  let curated = await curateDestinationAttractions({
+    destination: summary.title,
+    region: summary.region,
+    countryCode,
+    targetCount,
+    operationPrefix: "package",
+  });
 
   if (curated.length < 3) {
-    curated = dedupeNearbySpots(
-      candidates.sort((a, b) => qualityScore(b) - qualityScore(a)).slice(0, Math.max(3, targetCount))
-    );
+    getGuideMeLogger().warn("package_attraction_curation_thin", {
+      packageId: summary.id,
+      spotCount: curated.length,
+    });
   }
 
-  curated = await optimizeRoute(curated);
   curated = assignDays(curated, days);
 
   curated = await Promise.all(
@@ -618,42 +608,6 @@ async function generateTourPackageDetail(
     schemaVersion: CURATED_SCHEMA_VERSION,
     createdAtMillis: Date.now(),
   };
-}
-
-async function fetchGeminiSpots(
-  destination: string,
-  countryName: string,
-  countryCode: string,
-  maxResults: number
-): Promise<AttractionDoc[]> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return [];
-
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
-  try {
-    const prompt = buildSpotsPrompt(destination, countryName, countryCode, maxResults);
-    const responseText = await generateGeminiText("fetch_spots", model, prompt, {
-      destination,
-      countryCode,
-      maxResults,
-    });
-    const parsed = JSON.parse(extractJsonArray(responseText)) as AttractionDoc[];
-    return parsed.slice(0, maxResults).map((item, index) => ({
-      ...item,
-      id: item.id || slugify(item.name),
-      orderIndex: index,
-      estimatedMinutes: item.estimatedMinutes ?? 45,
-    }));
-  } catch (error) {
-    getGuideMeLogger().error("fetch_spots_failed", {
-      destination,
-      countryCode,
-      error: error instanceof Error ? error.message : "unknown",
-    });
-    return [];
-  }
 }
 
 async function generateWhyChosen(spot: AttractionDoc, packageTitle: string): Promise<string> {

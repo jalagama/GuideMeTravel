@@ -1,7 +1,16 @@
-export const EDITORIAL_PERSONA = `You are a senior travel editor at a premium guide publisher (Lonely Planet / National Geographic caliber).
+export const EDITORIAL_PERSONA = `You are a senior travel editor at a premium guide publisher (Lonely Planet / National Geographic / Rick Steves caliber).
+You curate bucket-list itineraries for international travelers — not generic map search results.
 Output only verifiable, ranked, country-specific recommendations.
 Never use vague phrases like "beautiful scenery", "amazing views", "must-see", or "stunning" without naming what makes it exceptional.
 Every recommendation must reference a real, named place, landmark, or experience.`;
+
+export const ATTRACTION_CURATION_RULES = `
+CURATION RULES (strict):
+- Rank by expert travel-guide significance: iconic landmarks, UNESCO sites, nationally famous beaches/nature, museums, historic districts, cultural sites.
+- List ALL major must-visit attractions BEFORE secondary or niche stops.
+- EXCLUDE entirely: rental businesses, hotels, restaurants, shops, malls, tour agencies, transport vendors, spas, gyms, or any commercial establishment.
+- INCLUDE only: landmarks, monuments, museums, beaches, nature sites, viewpoints, temples/churches, historic quarters, iconic experiences.
+- Works for any country worldwide — use globally recognized significance, not local business popularity.`;
 
 export function buildGenresPrompt(countryName: string, countryCode: string): string {
   return `${EDITORIAL_PERSONA}
@@ -30,7 +39,8 @@ Rules:
 - type: one of heritage, mountain, beach, wildlife, spiritual, culture, adventure, urban, wellness, festival, offbeat, family.
 - id: lowercase slug, unique, no spaces.
 - ONLY categories within ${countryName}. No fabricated places.
-- No duplicate or overlapping categories.`;
+- No duplicate or overlapping categories.
+- Each category should support a rich list of 25–30 distinct destinations when expanded.`;
 }
 
 export function buildPackagesPrompt(
@@ -41,35 +51,37 @@ export function buildPackagesPrompt(
 ): string {
   return `${EDITORIAL_PERSONA}
 
-List the top 20 iconic tourist destinations for "${genreName}" (${genreType}) in ${countryName} (ISO: ${countryCode}).
+List the top 30 iconic tourist destinations for "${genreName}" (${genreType}) in ${countryName} (ISO: ${countryCode}).
 
 Return JSON only:
 {
   "packages": [
     {
-      "id": "${countryCode.toLowerCase()}-taj-mahal",
-      "title": "Taj Mahal",
-      "region": "Agra, Uttar Pradesh",
+      "id": "${countryCode.toLowerCase()}-example-landmark",
+      "title": "Specific destination name",
+      "region": "City/State within ${countryName}",
       "days": 2,
-      "shortInfo": "UNESCO marble mausoleum built by Shah Jahan",
-      "imageSearchHint": "Taj Mahal Agra ${countryName}",
+      "shortInfo": "One specific fact — UNESCO status, dynasty, geography, or signature experience",
+      "imageSearchHint": "landmark name ${countryName}",
       "rank": 1,
       "bestFor": "First-time visitors",
-      "seasonality": "Oct–Mar"
+      "seasonality": "Best months"
     }
   ]
 }
 
 Rules:
-- Return exactly 20 real destinations ranked by national/international tourism significance (rank 1 = best in genre).
-- title = specific destination name (monument, city, national park, or region hub).
-- region = city/state within ${countryName}.
+- Return exactly 30 real destinations ranked by national/international tourism significance (rank 1 = most iconic in genre).
+- Include famous AND worthwhile secondary destinations — breadth matters; do not stop at only 5–10 obvious picks.
+- title = specific destination (monument, city, national park, island, or region hub) — not a business name.
+- region = city/state/province within ${countryName}.
 - days = suggested visit length 1–5.
 - shortInfo = one specific fact, not generic praise (max 100 chars).
 - bestFor = traveler profile (e.g. "Photography", "Families", "Adventure seekers").
-- seasonality = best months to visit (e.g. "Oct–Mar").
+- seasonality = best months to visit.
 - id: unique lowercase slug with prefix "${countryCode.toLowerCase()}-".
-- ONLY destinations inside ${countryName}. No fabrication.`;
+- ONLY destinations inside ${countryName}. No fabrication.
+- Prioritize UNESCO sites, nationally famous landmarks, and destinations recommended across major travel guides.`;
 }
 
 export function buildPackagesFillPrompt(
@@ -91,20 +103,58 @@ Rules:
 - Only destinations inside ${countryName}.
 - rank continues from ${existingTitles.length + 1}.
 - id prefix "${countryCode.toLowerCase()}-".
-- No duplicates from the existing list.`;
+- No duplicates from the existing list.
+- Prefer nationally significant places travelers would expect in a comprehensive ${genreName} guide.`;
 }
 
 export function buildSpotsPrompt(
+  destination: string,
+  region: string,
+  countryName: string,
+  countryCode: string,
+  maxResults: number
+): string {
+  return `${EDITORIAL_PERSONA}
+${ATTRACTION_CURATION_RULES}
+
+List the top ${maxResults} must-visit tourist attractions for travelers visiting "${destination}" in ${region}, ${countryName} (ISO: ${countryCode}).
+
+Return JSON array only:
+[
+  {
+    "id": "slug",
+    "name": "Official attraction name",
+    "description": "One specific fact about significance",
+    "significance": "Why this is bucket-list (UNESCO, dynasty, natural wonder, etc.)",
+    "latitude": 0.0,
+    "longitude": 0.0,
+    "estimatedMinutes": 90,
+    "rank": 1
+  }
+]
+
+Rules:
+- rank 1 = most essential; include every major landmark before minor stops.
+- estimatedMinutes: realistic visit duration (45–180).
+- Coordinates should be accurate when known; use 0 if uncertain.
+- Max ${maxResults} items. Only places inside ${countryName}. No fabrication.
+- For ${destination}: include all iconic sights a travel expert would insist on — not shops or rentals.`;
+}
+
+export function buildItineraryAttractionsPrompt(
   destination: string,
   countryName: string,
   countryCode: string,
   maxResults: number
 ): string {
   return `${EDITORIAL_PERSONA}
+${ATTRACTION_CURATION_RULES}
 
-Return JSON array only for major real tourist attractions near ${destination} in ${countryName}.
-Each item: id, name, description, latitude, longitude, estimatedMinutes, rating, userRatingsTotal.
-Max ${maxResults} items. Only places inside ${countryName} (${countryCode}). No fabrication.`;
+Return JSON array only for the top ${maxResults} must-visit tourist attractions in "${destination}", ${countryName} (ISO: ${countryCode}).
+
+Each item: id (slug), name, description, significance, latitude, longitude, estimatedMinutes, rank.
+Rank 1 = most iconic. Include every major landmark before secondary stops.
+Only real places inside ${countryName}. No commercial businesses. No fabrication.`;
 }
 
 export function buildWhyChosenPrompt(

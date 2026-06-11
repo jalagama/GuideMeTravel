@@ -1,4 +1,9 @@
 import { HttpsError } from "firebase-functions/v2/https";
+import {
+  EXCLUDED_PLACE_TYPES,
+  filterCuratedAttractions,
+  isCommercialAttraction,
+} from "./attractionCuration";
 import { fetchWithTimeout, logEvent } from "./utils";
 
 export type AttractionDoc = {
@@ -19,7 +24,18 @@ export type AttractionDoc = {
 };
 
 export const PLACES_RADIUS_METERS = 50000;
-export const CURATED_SCHEMA_VERSION = 3;
+export const CURATED_SCHEMA_VERSION = 4;
+
+type RawPlaceResult = {
+  place_id: string;
+  name: string;
+  vicinity?: string;
+  types?: string[];
+  rating?: number;
+  user_ratings_total?: number;
+  geometry: { location: { lat: number; lng: number } };
+  photos?: Array<{ photo_reference: string }>;
+};
 
 type GeocodeLocation = {
   lat: number;
@@ -166,25 +182,100 @@ export async function coordinatesAreInCountry(
   return resolvedCountry === countryCode.trim().toUpperCase();
 }
 
+export function placeTypesByPlaceId(places: RawPlaceResult[]): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const place of places) {
+    map.set(place.place_id, place.types ?? []);
+  }
+  return map;
+}
+
+function isLowValuePlace(place: RawPlaceResult): boolean {
+  const types = place.types ?? [];
+  if (isCommercialAttraction(place.name, types, place.vicinity)) {
+    return true;
+  }
+  if (types.length === 0) return false;
+  const hasExcludedOnly = types.every(
+    (type) => EXCLUDED_PLACE_TYPES.has(type) || type === "point_of_interest"
+  );
+  return hasExcludedOnly && types.some((type) => EXCLUDED_PLACE_TYPES.has(type));
+}
+
 async function mapPlacesResults(
-  places: any[],
+  places: RawPlaceResult[],
   maxResults: number,
   mapsKey: string
 ): Promise<AttractionDoc[]> {
-  return places.slice(0, maxResults).map((place: any, index: number) => ({
-    id: place.place_id,
-    name: place.name,
-    description: place.vicinity ?? "Popular tourist attraction",
-    latitude: place.geometry.location.lat,
-    longitude: place.geometry.location.lng,
-    orderIndex: index,
-    estimatedMinutes: 45,
-    rating: place.rating,
-    userRatingsTotal: place.user_ratings_total,
-    imageUrl: place.photos?.[0]
-      ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=640&photo_reference=${place.photos[0].photo_reference}&key=${mapsKey}`
-      : undefined,
-  }));
+  const curated = places
+    .filter((place) => !isLowValuePlace(place))
+    .slice(0, maxResults)
+    .map((place, index) => ({
+      id: place.place_id,
+      name: place.name,
+      description: place.vicinity ?? "Popular tourist attraction",
+      latitude: place.geometry.location.lat,
+      longitude: place.geometry.location.lng,
+      orderIndex: index,
+      estimatedMinutes: 45,
+      rating: place.rating,
+      userRatingsTotal: place.user_ratings_total,
+      imageUrl: place.photos?.[0]
+        ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=640&photo_reference=${place.photos[0].photo_reference}&key=${mapsKey}`
+        : undefined,
+    }));
+  return curated;
+}
+
+async function fetchPlacesNearbyPage(
+  lat: number,
+  lng: number,
+  mapsKey: string,
+  type?: string
+): Promise<RawPlaceResult[]> {
+  const typeParam = type ? `&type=${type}` : "";
+  const placesUrl =
+    `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}` +
+    `&radius=${PLACES_RADIUS_METERS}${typeParam}&key=${mapsKey}`;
+  const placesRes = await fetchWithTimeout(placesUrl);
+  const placesData = await placesRes.json();
+
+  if (placesData.status !== "OK" && placesData.status !== "ZERO_RESULTS") {
+    return [];
+  }
+  return (placesData.results ?? []) as RawPlaceResult[];
+}
+
+async function fetchPlacesTextSearch(
+  query: string,
+  mapsKey: string,
+  location?: { lat: number; lng: number }
+): Promise<RawPlaceResult[]> {
+  const locationBias = location
+    ? `&location=${location.lat},${location.lng}&radius=${PLACES_RADIUS_METERS}`
+    : "";
+  const placesUrl =
+    `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(query)}` +
+    `${locationBias}&key=${mapsKey}`;
+  const placesRes = await fetchWithTimeout(placesUrl);
+  const placesData = await placesRes.json();
+
+  if (placesData.status !== "OK" && placesData.status !== "ZERO_RESULTS") {
+    return [];
+  }
+  return (placesData.results ?? []) as RawPlaceResult[];
+}
+
+function dedupeRawPlaces(places: RawPlaceResult[]): RawPlaceResult[] {
+  const seen = new Set<string>();
+  const deduped: RawPlaceResult[] = [];
+  for (const place of places) {
+    const key = place.place_id || place.name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(place);
+  }
+  return deduped;
 }
 
 export async function fetchPlacesAttractions(
@@ -218,29 +309,46 @@ export async function fetchPlacesAttractionsInCountry(
   countryCode: string,
   maxResults = 25
 ): Promise<AttractionDoc[]> {
+  const { attractions } = await fetchCuratedPlacesAttractionsInCountry(
+    destination,
+    countryCode,
+    maxResults
+  );
+  return attractions;
+}
+
+export async function fetchCuratedPlacesAttractionsInCountry(
+  destination: string,
+  countryCode: string,
+  maxResults = 25
+): Promise<{ attractions: AttractionDoc[]; placeTypesById: Map<string, string[]> }> {
   const mapsKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!mapsKey) {
     throw new HttpsError("failed-precondition", "Google Maps API key is not configured.");
   }
 
+  const countryName = countryNameFromCode(countryCode);
   const location = await geocodeDestinationInCountry(destination, countryCode);
-  const placesUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${location.lat},${location.lng}&radius=${PLACES_RADIUS_METERS}&type=tourist_attraction&key=${mapsKey}`;
-  const placesRes = await fetchWithTimeout(placesUrl);
-  const placesData = await placesRes.json();
 
-  if (placesData.status !== "OK" && placesData.status !== "ZERO_RESULTS") {
-    logEvent("places_api_failed", {
-      destination,
-      countryCode,
-      status: placesData.status,
-      errorMessage: placesData.error_message,
-    });
-    return [];
-  }
+  const searchQueries = [
+    `top tourist attractions in ${destination}, ${countryName}`,
+    `must visit landmarks in ${destination}, ${countryName}`,
+    `famous sights in ${destination}, ${countryName}`,
+  ];
 
-  const mapped = await mapPlacesResults(placesData.results ?? [], maxResults * 2, mapsKey);
+  const rawPlaces = dedupeRawPlaces([
+    ...(await fetchPlacesNearbyPage(location.lat, location.lng, mapsKey, "tourist_attraction")),
+    ...(await fetchPlacesNearbyPage(location.lat, location.lng, mapsKey, "museum")),
+    ...(await fetchPlacesNearbyPage(location.lat, location.lng, mapsKey, "park")),
+    ...(await Promise.all(
+      searchQueries.map((query) => fetchPlacesTextSearch(query, mapsKey, location))
+    )).flat(),
+  ]);
+
+  const placeTypesById = placeTypesByPlaceId(rawPlaces);
+  const mapped = await mapPlacesResults(rawPlaces, maxResults * 3, mapsKey);
   const filtered: AttractionDoc[] = [];
-  for (const spot of mapped) {
+  for (const spot of filterCuratedAttractions(mapped, placeTypesById)) {
     const inCountry = await coordinatesAreInCountry(
       spot.latitude,
       spot.longitude,
@@ -249,9 +357,35 @@ export async function fetchPlacesAttractionsInCountry(
     if (inCountry) {
       filtered.push({ ...spot, orderIndex: filtered.length });
     }
-    if (filtered.length >= maxResults) break;
+    if (filtered.length >= maxResults * 2) break;
   }
-  return filtered;
+
+  const ranked = filtered
+    .sort((a, b) => qualityScore(b) - qualityScore(a))
+    .slice(0, maxResults)
+    .map((spot, index) => ({ ...spot, orderIndex: index }));
+
+  return { attractions: ranked, placeTypesById };
+}
+
+export async function geocodeAttractionInCountry(
+  attractionName: string,
+  destination: string,
+  countryCode: string
+): Promise<{ latitude: number; longitude: number } | null> {
+  const queries = [
+    `${attractionName}, ${destination}`,
+    `${attractionName}`,
+  ];
+  for (const query of queries) {
+    try {
+      const location = await geocodeDestinationInCountry(query, countryCode);
+      return { latitude: location.lat, longitude: location.lng };
+    } catch {
+      // Try the next query variant.
+    }
+  }
+  return null;
 }
 
 export async function optimizeRoute(attractions: AttractionDoc[]): Promise<AttractionDoc[]> {
@@ -323,14 +457,22 @@ export function dedupeNearbySpots(spots: AttractionDoc[], minKm = 2): Attraction
 export function qualityScore(spot: AttractionDoc): number {
   const rating = spot.rating ?? 3.5;
   const reviews = spot.userRatingsTotal ?? 0;
-  const reviewFactor = Math.min(Math.log10(reviews + 1), 3);
-  return rating * 2 + reviewFactor;
+  const reviewFactor = Math.min(Math.log10(reviews + 1) * 2.5, 8);
+  const iconicBonus = /\b(unesco|fort|palace|temple|museum|beach|cathedral|monument|national park)\b/i.test(
+    spot.name
+  )
+    ? 4
+    : 0;
+  return rating * 2 + reviewFactor + iconicBonus;
 }
 
 export function passesQualityGate(spot: AttractionDoc): boolean {
   const rating = spot.rating ?? 0;
   const reviews = spot.userRatingsTotal ?? 0;
-  return rating >= 3.8 || reviews >= 50;
+  const iconic = /\b(unesco|fort|palace|temple|museum|beach|cathedral|monument|falls|viewpoint|ruins)\b/i.test(
+    spot.name
+  );
+  return iconic || rating >= 4.0 || reviews >= 100;
 }
 
 export function targetSpotCount(days: number): number {

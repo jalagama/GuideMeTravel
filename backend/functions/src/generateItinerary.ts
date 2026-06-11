@@ -1,15 +1,7 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { HttpsError } from "firebase-functions/v2/https";
 import { db } from "./firebaseAdmin";
+import { curateDestinationAttractions } from "./curateAttractions";
 import { fetchWikipediaSummary } from "./wikipedia";
-import {
-  countryNameFromCode,
-  extractJsonArray,
-  fetchPlacesAttractionsInCountry,
-  optimizeRoute,
-  slugify,
-} from "./mapsHelpers";
-import { generateGeminiText } from "./logging/geminiLogging";
 import { getGuideMeLogger } from "./logging/loggerContext";
 import { validateLanguageCode } from "./utils";
 
@@ -33,7 +25,7 @@ type AttractionDoc = {
   transcript?: string;
 };
 
-const MAX_ATTRACTIONS = 5;
+const MAX_ATTRACTIONS = 8;
 const ESTIMATED_AUDIO_MB_PER_ATTRACTION = 2.5;
 const ESTIMATED_MAP_TILES_MB = 45;
 
@@ -87,85 +79,27 @@ async function curateAttractions(
   languageCode: string
 ): Promise<AttractionDoc[]> {
   getGuideMeLogger().info("curate_attractions_started", { destination, countryCode });
-  const placesAttractions = await fetchPlacesAttractionsInCountry(
+
+  const curated = await curateDestinationAttractions({
     destination,
     countryCode,
-    MAX_ATTRACTIONS
-  );
-  if (placesAttractions.length > 0) {
-    getGuideMeLogger().info("curate_attractions_places_hit", {
-      destination,
-      count: placesAttractions.length,
-    });
-    return enrichWithWikipedia(
-      await optimizeRoute(placesAttractions),
-      languageCode
-    );
-  }
+    targetCount: MAX_ATTRACTIONS,
+    operationPrefix: "itinerary",
+  });
 
-  getGuideMeLogger().warn("curate_attractions_places_miss", { destination, countryCode });
-  const geminiAttractions = await fetchGeminiAttractions(destination, countryCode);
-  if (geminiAttractions.length > 0) {
-    getGuideMeLogger().info("curate_attractions_gemini_hit", {
-      destination,
-      count: geminiAttractions.length,
-    });
-    return enrichWithWikipedia(
-      await optimizeRoute(geminiAttractions),
-      languageCode
-    );
-  }
-
-  throw new HttpsError(
-    "not-found",
-    `No tourist attractions found near "${destination}". Try a more specific destination name.`
-  );
-}
-
-async function fetchGeminiAttractions(
-  destination: string,
-  countryCode: string
-): Promise<AttractionDoc[]> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+  if (curated.length === 0) {
     throw new HttpsError(
-      "failed-precondition",
-      "Gemini API key is not configured. Cannot curate attractions."
+      "not-found",
+      `No tourist attractions found near "${destination}". Try a more specific destination name.`
     );
   }
 
-  const countryName = countryNameFromCode(countryCode);
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-  const prompt = `
-You are a travel planner for ${countryName} (${countryCode}).
-Return JSON array only for major tourist attractions near ${destination} inside ${countryName}.
-Each item must include: id (slug), name, description, latitude, longitude, orderIndex, estimatedMinutes.
-Use only real places in ${countryName}. Limit to ${MAX_ATTRACTIONS} attractions.
-Never include places outside ${countryName}.
-`;
+  getGuideMeLogger().info("curate_attractions_complete", {
+    destination,
+    count: curated.length,
+  });
 
-  try {
-    const text = extractJsonArray(
-      await generateGeminiText("fetch_itinerary_attractions", model, prompt, {
-        destination,
-        countryCode,
-      })
-    );
-    const parsed = JSON.parse(text) as AttractionDoc[];
-    return parsed.slice(0, MAX_ATTRACTIONS).map((item, index) => ({
-      ...item,
-      id: item.id || slugify(item.name),
-      orderIndex: index,
-      estimatedMinutes: item.estimatedMinutes ?? 45,
-    }));
-  } catch (error) {
-    getGuideMeLogger().error("gemini_curation_failed", {
-      destination,
-      error: error instanceof Error ? error.message : "unknown",
-    });
-    return [];
-  }
+  return enrichWithWikipedia(curated, languageCode);
 }
 
 async function cacheGlobalAttractions(attractions: AttractionDoc[]): Promise<void> {
@@ -205,4 +139,3 @@ async function enrichWithWikipedia(
     })
   );
 }
-

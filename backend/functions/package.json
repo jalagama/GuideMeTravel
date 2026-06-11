@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node --test lib/logging/GuideMeLogger.test.js",
+    "test": "npm run build && node --test lib/logging/GuideMeLogger.test.js lib/attractionCuration.test.js",
     "serve": "npm run build && firebase emulators:start --only functions,firestore",
     "deploy": "firebase deploy --only functions,firestore,storage"
   },

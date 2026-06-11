@@ -53,50 +53,70 @@ export async function curateDestinationAttractions(input: {
   if (geminiSpots.length === 0) {
     getGuideMeLogger().error("expert_spots_empty", {
       destination: input.destination,
+      region,
       countryCode: input.countryCode,
       operationPrefix: input.operationPrefix,
     });
-    if (placesResult.attractions.length === 0) {
-      throw new HttpsError(
-        "unavailable",
-        `Could not curate attractions for "${input.destination}". Please try again shortly.`
-      );
-    }
+    throw new HttpsError(
+      "unavailable",
+      `Could not curate expert attractions for "${input.destination}" right now. Please try again shortly.`
+    );
   }
 
   const geminiRanks = buildGeminiRankMap(
     geminiSpots.map((spot, index) => ({ name: spot.name, rank: spot.rank ?? index + 1 }))
   );
 
+  // Google Places is used ONLY to enrich editorial picks (coordinates, photos, ratings).
+  // It never contributes new candidates to the itinerary.
   let enrichedGemini = enrichGeminiWithPlacesMetadata(geminiSpots, placesResult.attractions);
   enrichedGemini = await enrichGeminiSpotsWithCoordinates(
     enrichedGemini,
     input.destination,
+    region,
     input.countryCode,
     placesResult.attractions
   );
+
+  const droppedForCoordinates = enrichedGemini.filter((spot) => !hasValidCoordinates(spot));
+  if (droppedForCoordinates.length > 0) {
+    getGuideMeLogger().warn("expert_spots_dropped_missing_coordinates", {
+      destination: input.destination,
+      region,
+      countryCode: input.countryCode,
+      droppedCount: droppedForCoordinates.length,
+      droppedNames: droppedForCoordinates.map((spot) => spot.name),
+    });
+  }
 
   const selected = selectEditorialAttractions(enrichedGemini, {
     geminiRanks,
     targetCount: input.targetCount,
     minCount,
-    fallbackSpots: placesResult.attractions,
     placeTypesById: placesResult.placeTypesById,
   });
 
   if (selected.length === 0) {
+    getGuideMeLogger().error("expert_spots_all_dropped", {
+      destination: input.destination,
+      region,
+      countryCode: input.countryCode,
+      geminiCount: geminiSpots.length,
+    });
     throw new HttpsError(
       "not-found",
-      `No tourist attractions found near "${input.destination}". Try a more specific destination name.`
+      `Could not resolve verified locations for "${input.destination}". Try a more specific destination name.`
     );
   }
 
   getGuideMeLogger().info("curate_destination_attractions_complete", {
     destination: input.destination,
+    region,
     countryCode: input.countryCode,
     geminiCount: geminiSpots.length,
+    placesEnrichmentCount: placesResult.attractions.length,
     selectedCount: selected.length,
-    usedPlacesFallback: geminiSpots.length === 0,
+    selectedNames: selected.map((spot) => spot.name),
   });
 
   const ordered = selected.map((spot, index) => ({ ...spot, orderIndex: index }));
@@ -143,46 +163,59 @@ async function fetchExpertGeminiSpots(
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
   const prompt = buildSpotsPrompt(destination, region, countryName, countryCode, maxResults);
 
-  try {
-    const responseText = await generateGeminiText(
-      `${operationPrefix}_expert_spots`,
-      model,
-      prompt,
-      { destination, region, countryCode, maxResults }
-    );
-    const parsed = JSON.parse(extractJsonArray(responseText)) as GeminiSpot[];
-    return parsed
-      .slice(0, maxResults)
-      .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999))
-      .map((item, index) => ({
-        ...item,
-        id: item.id || slugify(item.name),
-        orderIndex: index,
-        estimatedMinutes: item.estimatedMinutes ?? 60,
-        description: item.significance || item.description || item.name,
-      }));
-  } catch (error) {
-    getGuideMeLogger().error("expert_spots_failed", {
-      destination,
-      countryCode,
-      error: error instanceof Error ? error.message : "unknown",
-    });
-    return [];
+  const maxAttempts = 2;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const responseText = await generateGeminiText(
+        `${operationPrefix}_expert_spots`,
+        model,
+        prompt,
+        { destination, region, countryCode, maxResults, attempt }
+      );
+      const parsed = JSON.parse(extractJsonArray(responseText)) as GeminiSpot[];
+      const spots = parsed
+        .filter((item) => item && typeof item.name === "string" && item.name.trim().length > 0)
+        .slice(0, maxResults)
+        .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999))
+        .map((item, index) => ({
+          ...item,
+          id: item.id || slugify(item.name),
+          orderIndex: index,
+          estimatedMinutes: item.estimatedMinutes ?? 60,
+          description: item.significance || item.description || item.name,
+        }));
+      if (spots.length > 0) {
+        return spots;
+      }
+      getGuideMeLogger().warn("expert_spots_empty_response", {
+        destination,
+        countryCode,
+        attempt,
+      });
+    } catch (error) {
+      getGuideMeLogger().error("expert_spots_failed", {
+        destination,
+        countryCode,
+        attempt,
+        error: error instanceof Error ? error.message : "unknown",
+      });
+    }
   }
+
+  return [];
 }
 
 async function enrichGeminiSpotsWithCoordinates(
   spots: AttractionDoc[],
   destination: string,
+  region: string,
   countryCode: string,
   placesSpots: AttractionDoc[] = []
 ): Promise<AttractionDoc[]> {
   return Promise.all(
     spots.map(async (spot) => {
-      if (hasValidCoordinates(spot)) {
-        return spot;
-      }
-
+      // Prefer authoritative Google Places coordinates when a confident name match exists,
+      // because Gemini coordinates can be approximate.
       const placeMatch = placesSpots.find((place) => namesLikelyMatch(place.name, spot.name));
       if (placeMatch && hasValidCoordinates(placeMatch)) {
         return {
@@ -193,7 +226,16 @@ async function enrichGeminiSpotsWithCoordinates(
         };
       }
 
-      const geocoded = await geocodeAttractionInCountry(spot.name, destination, countryCode);
+      if (hasValidCoordinates(spot)) {
+        return spot;
+      }
+
+      const geocoded = await geocodeAttractionInCountry(
+        spot.name,
+        destination,
+        countryCode,
+        region
+      );
       if (!geocoded) {
         return spot;
       }

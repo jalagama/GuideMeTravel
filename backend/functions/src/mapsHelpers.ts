@@ -24,7 +24,7 @@ export type AttractionDoc = {
 };
 
 export const PLACES_RADIUS_METERS = 50000;
-export const CURATED_SCHEMA_VERSION = 6;
+export const CURATED_SCHEMA_VERSION = 7;
 
 type RawPlaceResult = {
   place_id: string;
@@ -408,12 +408,19 @@ export async function fetchCuratedPlacesAttractionsInCountry(
 export async function geocodeAttractionInCountry(
   attractionName: string,
   destination: string,
-  countryCode: string
+  countryCode: string,
+  region?: string
 ): Promise<{ latitude: number; longitude: number } | null> {
+  const countryName = countryNameFromCode(countryCode);
   const queries = [
+    region ? `${attractionName}, ${destination}, ${region}` : undefined,
+    `${attractionName}, ${destination}, ${countryName}`,
     `${attractionName}, ${destination}`,
+    region ? `${attractionName}, ${region}` : undefined,
+    `${attractionName}, ${countryName}`,
     `${attractionName}`,
-  ];
+  ].filter((q): q is string => Boolean(q));
+
   for (const query of queries) {
     try {
       const location = await geocodeDestinationInCountry(query, countryCode);

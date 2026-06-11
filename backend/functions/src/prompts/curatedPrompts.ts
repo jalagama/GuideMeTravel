@@ -136,7 +136,7 @@ Return JSON array only:
 Rules:
 - rank 1 = most essential; include every major landmark before minor stops.
 - estimatedMinutes: realistic visit duration (45–180).
-- Coordinates should be accurate when known; use 0 if uncertain.
+- latitude/longitude: ALWAYS provide your best-estimate real decimal coordinates for the named place. NEVER return 0 — approximate from the city center if unsure.
 - Max ${maxResults} items. Only places inside ${countryName}. No fabrication.
 - For ${destination}: include all iconic sights a travel expert would insist on — not shops or rentals.`;
 }

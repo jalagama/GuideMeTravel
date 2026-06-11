@@ -12,7 +12,7 @@ import kotlinx.serialization.json.Json
 
 private val curatedJson = Json { ignoreUnknownKeys = true }
 
-const val CURATED_SCHEMA_VERSION = 6
+const val CURATED_SCHEMA_VERSION = 7
 
 fun CountryGenres.toCacheEntity(schemaVersion: Int = CURATED_SCHEMA_VERSION): CountryGenresCacheEntity {
     return CountryGenresCacheEntity(

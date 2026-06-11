@@ -1,8 +1,9 @@
 /**
  * Central Gemini model configuration.
  *
- * gemini-2.0-flash was retired on 2026-06-01 (404). Use 2.5 models with the
- * legacy @google/generative-ai SDK, or override via GEMINI_MODEL env var.
+ * gemini-2.0-flash was retired on 2026-06-01 (404). We call Gemini via REST
+ * (see geminiClient.ts) with header auth so both AIza and AQ. keys work.
+ * Override the model with the GEMINI_MODEL env var if needed.
  */
 export const GEMINI_MODEL_FALLBACKS = [
   "gemini-2.5-flash",

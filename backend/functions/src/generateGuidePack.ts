@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import textToSpeech from "@google-cloud/text-to-speech";
 import { Translate } from "@google-cloud/translate/build/src/v2";
 import { HttpsError } from "firebase-functions/v2/https";
@@ -8,7 +7,7 @@ import { getVoiceForLanguage } from "./ttsVoices";
 import { generateGeminiText } from "./logging/geminiLogging";
 import { getGuideMeLogger } from "./logging/loggerContext";
 import { buildAttractionGuideScriptPrompt } from "./prompts/curatedPrompts";
-import { GEMINI_MODEL } from "./geminiConfig";
+import { hasGeminiApiKey } from "./geminiClient";
 import {
   runWithConcurrency,
   validateLanguageCode,
@@ -168,22 +167,19 @@ async function buildGuideScript(
 ): Promise<{ script: string; source: string }> {
   const wikiFacts = await fetchWikipediaSummary(attraction.name, languageCode);
   const groundedFacts = wikiFacts || `${attraction.name}. ${attraction.description}`;
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
 
   let script = `Welcome to ${attraction.name}. ${groundedFacts}`;
   let source = "wikipedia";
 
-  if (apiKey) {
+  if (hasGeminiApiKey()) {
     try {
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
       const prompt = buildAttractionGuideScriptPrompt(
         attraction.name,
         groundedFacts,
         languageCode
       );
       script = (
-        await generateGeminiText("build_guide_script", model, prompt, {
+        await generateGeminiText("build_guide_script", prompt, {
           attraction: attraction.name,
           languageCode,
         })

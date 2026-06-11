@@ -64,6 +64,32 @@ cd ..
 firebase deploy --only functions
 ```
 
+### Gemini API key (required for attraction curation)
+
+`GEMINI_API_KEY` must be a **Gemini API key** from [Google AI Studio](https://aistudio.google.com/apikey). It must start with `AIza...`.
+
+**Do not use:** Google Maps keys, Firebase keys, GCP service-account JSON, or OAuth tokens (values starting with `AQ.` are invalid for the Gemini REST API).
+
+Verify locally before deploy:
+
+```bash
+cd backend/functions
+GEMINI_API_KEY=your_key_here npm run smoke:gemini
+```
+
+If you see `API_KEY_INVALID`, create a new key in AI Studio and update the secret:
+
+```bash
+firebase functions:secrets:set GEMINI_API_KEY --project travelguide-47f80
+firebase deploy --only functions
+```
+
+Confirm the secret value (should start with `AIza...` and work in AI Studio):
+
+```bash
+firebase functions:secrets:access GEMINI_API_KEY --project travelguide-47f80
+```
+
 If the Android app shows **"The request was not authorized to invoke this service"**, Cloud Run IAM is blocking the callable. Fix it:
 
 ```bash

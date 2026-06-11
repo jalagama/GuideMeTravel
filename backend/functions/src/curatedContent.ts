@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { HttpsError } from "firebase-functions/v2/https";
 import { db } from "./firebaseAdmin";
 import {
@@ -31,7 +30,7 @@ import {
 } from "./prompts/curatedPrompts";
 import { generateGeminiText } from "./logging/geminiLogging";
 import { getGuideMeLogger } from "./logging/loggerContext";
-import { GEMINI_MODEL } from "./geminiConfig";
+import { hasGeminiApiKey } from "./geminiClient";
 
 type GenreDoc = {
   id: string;
@@ -285,18 +284,14 @@ export async function createTripFromPackage(input: {
 }
 
 async function generateGenresWithGemini(countryName: string, countryCode: string): Promise<GenreDoc[]> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+  if (!hasGeminiApiKey()) {
     getGuideMeLogger().logFallback("generate_genres", "missing_gemini_api_key", { countryCode });
     return fallbackGenres(countryCode);
   }
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-
   try {
     const prompt = buildGenresPrompt(countryName, countryCode);
-    const responseText = await generateGeminiText("generate_genres", model, prompt, {
+    const responseText = await generateGeminiText("generate_genres", prompt, {
       countryCode,
       countryName,
     });
@@ -335,8 +330,7 @@ async function generatePackagesWithGemini(
   countryCode: string,
   genre: GenreDoc
 ): Promise<PackageSummaryDoc[]> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+  if (!hasGeminiApiKey()) {
     getGuideMeLogger().logFallback("generate_packages", "missing_gemini_api_key", {
       countryCode,
       genreId: genre.id,
@@ -344,17 +338,13 @@ async function generatePackagesWithGemini(
     return buildFallbackPackages(countryCode, genre);
   }
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-
   try {
-    let rawPackages = await fetchPackagesFromGemini(model, countryName, countryCode, genre);
+    let rawPackages = await fetchPackagesFromGemini(countryName, countryCode, genre);
     rawPackages = dedupeByTitle(rawPackages);
     rawPackages = await verifyPackagesInCountry(rawPackages, countryCode, countryName);
 
     if (rawPackages.length < MIN_PACKAGE_COUNT) {
       const fill = await fetchPackagesFillFromGemini(
-        model,
         countryName,
         countryCode,
         genre,
@@ -411,13 +401,12 @@ async function generatePackagesWithGemini(
 }
 
 async function fetchPackagesFromGemini(
-  model: ReturnType<GoogleGenerativeAI["getGenerativeModel"]>,
   countryName: string,
   countryCode: string,
   genre: GenreDoc
 ): Promise<PackageSummaryDoc[]> {
   const prompt = buildPackagesPrompt(countryName, countryCode, genre.name, genre.type);
-  const responseText = await generateGeminiText("fetch_packages", model, prompt, {
+  const responseText = await generateGeminiText("fetch_packages", prompt, {
     countryCode,
     genreId: genre.id,
   });
@@ -433,7 +422,6 @@ async function fetchPackagesFromGemini(
 }
 
 async function fetchPackagesFillFromGemini(
-  model: ReturnType<GoogleGenerativeAI["getGenerativeModel"]>,
   countryName: string,
   countryCode: string,
   genre: GenreDoc,
@@ -448,7 +436,7 @@ async function fetchPackagesFillFromGemini(
     existingTitles,
     needed
   );
-  const responseText = await generateGeminiText("fetch_packages_fill", model, prompt, {
+  const responseText = await generateGeminiText("fetch_packages_fill", prompt, {
     countryCode,
     genreId: genre.id,
     needed,
@@ -616,13 +604,9 @@ async function generateTourPackageDetail(
 }
 
 async function generateWhyChosen(spot: AttractionDoc, packageTitle: string): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+  if (!hasGeminiApiKey()) {
     return `Essential stop on the ${packageTitle} route — ${spot.name} ranks among the region's top-rated attractions.`;
   }
-
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
   try {
     const prompt = buildWhyChosenPrompt(
@@ -631,7 +615,7 @@ async function generateWhyChosen(spot: AttractionDoc, packageTitle: string): Pro
       spot.rating,
       spot.userRatingsTotal
     );
-    const responseText = await generateGeminiText("generate_why_chosen", model, prompt, {
+    const responseText = await generateGeminiText("generate_why_chosen", prompt, {
       spotName: spot.name,
       packageTitle,
     });
@@ -660,9 +644,8 @@ async function generateTourGuideTranscript(
   packageTitle: string,
   region: string
 ): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
   const grounded = description.trim();
-  if (!apiKey) {
+  if (!hasGeminiApiKey()) {
     return [
       `Welcome — you've arrived at ${spotName}, one of the essential stops on your ${packageTitle} journey.`,
       grounded,
@@ -673,12 +656,9 @@ async function generateTourGuideTranscript(
       .join(" ");
   }
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-
   try {
     const prompt = buildTourGuideTranscriptPrompt(spotName, grounded, packageTitle, region);
-    const responseText = await generateGeminiText("generate_tour_guide_transcript", model, prompt, {
+    const responseText = await generateGeminiText("generate_tour_guide_transcript", prompt, {
       spotName,
       packageTitle,
     });
@@ -743,16 +723,12 @@ async function generatePackageExtras(
     restaurants: [] as NearbyPlaceDoc[],
   };
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+  if (!hasGeminiApiKey()) {
     getGuideMeLogger().logFallback("generate_package_extras", "missing_gemini_api_key", {
       packageId: summary.id,
     });
     return fallback;
   }
-
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
   try {
     const prompt = buildPackageExtrasPrompt(
@@ -763,7 +739,7 @@ async function generatePackageExtras(
       spotNames,
       daySpotGroups
     );
-    const responseText = await generateGeminiText("generate_package_extras", model, prompt, {
+    const responseText = await generateGeminiText("generate_package_extras", prompt, {
       packageId: summary.id,
       spotCount: spots.length,
     });
@@ -802,18 +778,16 @@ async function fetchVerifiedHotels(
   region: string
 ): Promise<NearbyPlaceDoc[]> {
   const places = await fetchPlacesNearbyByType(lat, lng, "lodging", 5);
-  const apiKey = process.env.GEMINI_API_KEY;
-  const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
-  const model = genAI?.getGenerativeModel({ model: GEMINI_MODEL });
+  const geminiAvailable = hasGeminiApiKey();
 
   return Promise.all(
     places.map(async (place) => {
       let description = place.description;
-      if (model) {
+      if (geminiAvailable) {
         try {
           const prompt = buildHotelDescriptionPrompt(place.name, region);
           description = (
-            await generateGeminiText("hotel_description", model, prompt, {
+            await generateGeminiText("hotel_description", prompt, {
               hotelName: place.name,
               region,
             })
@@ -843,18 +817,16 @@ async function fetchVerifiedRestaurants(
   region: string
 ): Promise<NearbyPlaceDoc[]> {
   const places = await fetchPlacesNearbyByType(lat, lng, "restaurant", 5);
-  const apiKey = process.env.GEMINI_API_KEY;
-  const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
-  const model = genAI?.getGenerativeModel({ model: GEMINI_MODEL });
+  const geminiAvailable = hasGeminiApiKey();
 
   return Promise.all(
     places.map(async (place) => {
       let description = place.description;
-      if (model) {
+      if (geminiAvailable) {
         try {
           const prompt = buildRestaurantDescriptionPrompt(place.name, region);
           description = (
-            await generateGeminiText("restaurant_description", model, prompt, {
+            await generateGeminiText("restaurant_description", prompt, {
               restaurantName: place.name,
               region,
             })

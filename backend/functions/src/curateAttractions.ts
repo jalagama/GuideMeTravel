@@ -17,7 +17,7 @@ import {
 } from "./mapsHelpers";
 import { buildSpotsPrompt } from "./prompts/curatedPrompts";
 import { getGuideMeLogger } from "./logging/loggerContext";
-import { generateGeminiJson, hasGeminiApiKey } from "./geminiClient";
+import { generateGeminiJson, hasGeminiApiKey, isInvalidGeminiApiKeyError } from "./geminiClient";
 
 type GeminiSpot = AttractionDoc & { rank?: number; significance?: string };
 
@@ -57,9 +57,9 @@ export async function curateDestinationAttractions(input: {
       hasGeminiApiKey: hasGeminiApiKey(),
     });
     throw new HttpsError(
-      "unavailable",
+      "failed-precondition",
       hasGeminiApiKey()
-        ? `Could not curate expert attractions for "${input.destination}" right now. Please try again shortly.`
+        ? "AI curation is misconfigured on the server (invalid Gemini API key). Contact support."
         : "AI curation is not configured on the server. Contact support."
     );
   }
@@ -198,11 +198,15 @@ async function fetchExpertGeminiSpots(
   }
 
   if (lastError) {
-    getGuideMeLogger().error("expert_spots_exhausted", {
-      destination,
-      countryCode,
-      error: lastError instanceof Error ? lastError.message : String(lastError),
-    });
+    const errorMessage = lastError instanceof Error ? lastError.message : String(lastError);
+    getGuideMeLogger().error(
+      isInvalidGeminiApiKeyError(lastError) ? "expert_spots_invalid_api_key" : "expert_spots_exhausted",
+      {
+        destination,
+        countryCode,
+        error: errorMessage,
+      }
+    );
   }
 
   return [];

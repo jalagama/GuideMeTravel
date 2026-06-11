@@ -16,6 +16,7 @@ import com.guideme.travel.domain.model.TourPackageDetail
 import com.guideme.travel.domain.model.TourPackageSummary
 import com.guideme.travel.domain.model.TripPlan
 import com.guideme.travel.domain.model.TripStatus
+import com.guideme.travel.domain.logging.GuideMeLogger
 import com.guideme.travel.domain.repository.AuthRepository
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
@@ -25,7 +26,8 @@ import javax.inject.Singleton
 class FirebaseCuratedContentDataSource @Inject constructor(
     private val functions: FirebaseFunctions,
     private val authRepository: AuthRepository,
-    private val firebaseAuth: FirebaseAuth
+    private val firebaseAuth: FirebaseAuth,
+    private val logger: GuideMeLogger
 ) {
     suspend fun getCountryGenres(countryCode: String): CountryGenres {
         val data = callFunction(
@@ -103,6 +105,7 @@ class FirebaseCuratedContentDataSource @Inject constructor(
         name: String,
         payload: Map<String, Any>
     ): Map<String, Any?> {
+        logger.logRemoteRequest(name, payload.mapValues { it.value })
         authRepository.ensureSignedIn()
         authRepository.getIdToken(forceRefresh = true)
         if (!BuildConfig.DEBUG) {
@@ -112,10 +115,39 @@ class FirebaseCuratedContentDataSource @Inject constructor(
         val result = try {
             functions.getHttpsCallable(name).call(payload).await()
         } catch (error: Exception) {
+            logger.logRemoteError(name, error, payload.mapValues { it.value })
             throw mapRemoteError(error)
         }
         @Suppress("UNCHECKED_CAST")
-        return result.getData() as Map<String, Any?>
+        val data = result.getData() as Map<String, Any?>
+        logger.logRemoteResponse(name, summarizeResponse(name, data))
+        return data
+    }
+
+    private fun summarizeResponse(functionName: String, data: Map<String, Any?>): Map<String, Any?> {
+        return when (functionName) {
+            "getCountryGenres" -> mapOf(
+                "countryCode" to data["countryCode"],
+                "genreCount" to (data["genres"] as? List<*>)?.size,
+                "schemaVersion" to data["schemaVersion"]
+            )
+            "getGenrePackages" -> mapOf(
+                "countryCode" to data["countryCode"],
+                "genreId" to data["genreId"],
+                "packageCount" to (data["packages"] as? List<*>)?.size,
+                "schemaVersion" to data["schemaVersion"]
+            )
+            "getTourPackageDetail" -> mapOf(
+                "packageId" to data["id"],
+                "spotCount" to (data["spots"] as? List<*>)?.size,
+                "days" to data["days"]
+            )
+            "createTripFromPackage" -> mapOf(
+                "tripId" to data["tripId"],
+                "attractionCount" to (data["attractions"] as? List<*>)?.size
+            )
+            else -> mapOf("keys" to data.keys.joinToString(","))
+        }
     }
 
     private fun parseGenre(data: Map<String, Any?>): CuratedGenre {

@@ -4,8 +4,9 @@ import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import androidx.work.WorkManager
-import dagger.hilt.android.HiltAndroidApp
 import com.google.android.libraries.places.api.Places
+import com.google.firebase.crashlytics.FirebaseCrashlytics
+import dagger.hilt.android.HiltAndroidApp
 import org.maplibre.android.MapLibre
 import org.maplibre.android.WellKnownTileServer
 import javax.inject.Inject
@@ -25,6 +26,7 @@ class GuideMeApplication : Application(), Configuration.Provider {
             .build()
         WorkManager.initialize(this, cachedWorkManagerConfiguration)
         installAppCheck()
+        installCrashlytics()
 
         val mapTilerKey = BuildConfig.MAPTILER_API_KEY
         MapLibre.getInstance(
@@ -41,4 +43,12 @@ class GuideMeApplication : Application(), Configuration.Provider {
 
     override val workManagerConfiguration: Configuration
         get() = cachedWorkManagerConfiguration
+
+    private fun installCrashlytics() {
+        val crashlytics = FirebaseCrashlytics.getInstance()
+        crashlytics.setCrashlyticsCollectionEnabled(true)
+        crashlytics.setCustomKey("app_version", BuildConfig.VERSION_NAME)
+        crashlytics.setCustomKey("version_code", BuildConfig.VERSION_CODE)
+        crashlytics.log("app_started")
+    }
 }

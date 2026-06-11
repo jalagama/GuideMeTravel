@@ -4,6 +4,9 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
+import com.guideme.travel.domain.analytics.AnalyticsEvents
+import com.guideme.travel.domain.analytics.AnalyticsParams
+import com.guideme.travel.domain.analytics.GuideMeAnalytics
 import com.guideme.travel.domain.model.TripPlan
 import com.guideme.travel.domain.usecase.ObserveTripUseCase
 import com.guideme.travel.domain.usecase.StartTripUseCase
@@ -25,7 +28,8 @@ data class ItineraryUiState(
 class ItineraryViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val observeTripUseCase: ObserveTripUseCase,
-    private val startTripUseCase: StartTripUseCase
+    private val startTripUseCase: StartTripUseCase,
+    private val analytics: GuideMeAnalytics
 ) : ViewModel() {
 
     private val tripId: String = savedStateHandle.toRoute<ItineraryRoute>().tripId
@@ -40,8 +44,13 @@ class ItineraryViewModel @Inject constructor(
             initialValue = ItineraryUiState()
         )
 
+    init {
+        analytics.logEvent(AnalyticsEvents.ITINERARY_VIEWED, mapOf(AnalyticsParams.TRIP_ID to tripId))
+    }
+
     fun startTrip(tripId: String) {
         viewModelScope.launch {
+            analytics.logEvent(AnalyticsEvents.START_TRIP_ONLINE, mapOf(AnalyticsParams.TRIP_ID to tripId))
             startTripUseCase(tripId)
         }
     }

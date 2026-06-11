@@ -4,6 +4,9 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
+import com.guideme.travel.domain.analytics.AnalyticsEvents
+import com.guideme.travel.domain.analytics.AnalyticsParams
+import com.guideme.travel.domain.analytics.GuideMeAnalytics
 import com.guideme.travel.domain.model.GuidePlaybackState
 import com.guideme.travel.domain.usecase.GetGuideContentUseCase
 import com.guideme.travel.domain.usecase.ObservePlaybackStateUseCase
@@ -33,7 +36,8 @@ class GuidePlayerViewModel @Inject constructor(
     private val observePlaybackStateUseCase: ObservePlaybackStateUseCase,
     private val playGuideUseCase: PlayGuideUseCase,
     private val stopGuideUseCase: StopGuideUseCase,
-    private val getGuideContentUseCase: GetGuideContentUseCase
+    private val getGuideContentUseCase: GetGuideContentUseCase,
+    private val analytics: GuideMeAnalytics
 ) : ViewModel() {
 
     private val route = savedStateHandle.toRoute<GuidePlayerRoute>()
@@ -58,12 +62,27 @@ class GuidePlayerViewModel @Inject constructor(
         viewModelScope.launch {
             val trip = observeTripUseCase(tripId).first() ?: return@launch
             val attraction = getGuideContentUseCase(tripId, attractionId) ?: return@launch
+            analytics.logEvent(
+                AnalyticsEvents.GUIDE_PLAYED,
+                mapOf(
+                    AnalyticsParams.TRIP_ID to tripId,
+                    "attraction_id" to attractionId,
+                    "attraction_name" to attraction.name
+                )
+            )
             playGuideUseCase(attraction, trip.languageCode)
         }
     }
 
     fun stop() {
         viewModelScope.launch {
+            analytics.logEvent(
+                "guide_stopped",
+                mapOf(
+                    AnalyticsParams.TRIP_ID to route.tripId,
+                    "attraction_id" to route.attractionId
+                )
+            )
             stopGuideUseCase()
         }
     }

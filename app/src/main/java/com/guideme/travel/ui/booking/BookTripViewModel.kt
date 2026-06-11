@@ -6,6 +6,10 @@ import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import com.guideme.travel.domain.model.TourPackageDetail
 import com.guideme.travel.domain.model.TripOffering
+import com.guideme.travel.domain.analytics.AnalyticsEvents
+import com.guideme.travel.domain.analytics.AnalyticsParams
+import com.guideme.travel.domain.logging.GuideMeLogger
+import com.guideme.travel.domain.logging.LogTags
 import com.guideme.travel.domain.usecase.ObserveDefaultLanguageUseCase
 import com.guideme.travel.domain.usecase.ObserveTourPackageDetailUseCase
 import com.guideme.travel.domain.usecase.StartTripFromPackageUseCase
@@ -33,7 +37,8 @@ class BookTripViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val observeTourPackageDetailUseCase: ObserveTourPackageDetailUseCase,
     private val startTripFromPackageUseCase: StartTripFromPackageUseCase,
-    private val observeDefaultLanguageUseCase: ObserveDefaultLanguageUseCase
+    private val observeDefaultLanguageUseCase: ObserveDefaultLanguageUseCase,
+    private val logger: GuideMeLogger
 ) : ViewModel() {
 
     private val route = savedStateHandle.toRoute<BookTripRoute>()
@@ -68,6 +73,11 @@ class BookTripViewModel @Inject constructor(
 
     private fun bookTrip(preferLocal: Boolean, onSuccess: (String) -> Unit) {
         viewModelScope.launch {
+            logger.info(
+                LogTags.BOOK_TRIP_VM,
+                AnalyticsEvents.BOOK_TRIP_STARTED,
+                mapOf(AnalyticsParams.PACKAGE_ID to route.packageId, AnalyticsParams.PREFER_LOCAL to preferLocal)
+            )
             _uiState.update { it.copy(isBooking = true, errorMessage = null) }
             val language = observeDefaultLanguageUseCase().first()
             runCatching {
@@ -80,9 +90,20 @@ class BookTripViewModel @Inject constructor(
                     preferLocal = preferLocal
                 )
             }.onSuccess { trip ->
+                logger.info(
+                    LogTags.BOOK_TRIP_VM,
+                    AnalyticsEvents.BOOK_TRIP_COMPLETE,
+                    mapOf(AnalyticsParams.TRIP_ID to trip.id, AnalyticsParams.PACKAGE_ID to route.packageId)
+                )
                 _uiState.update { it.copy(isBooking = false) }
                 onSuccess(trip.id)
             }.onFailure { error ->
+                logger.error(
+                    LogTags.BOOK_TRIP_VM,
+                    AnalyticsEvents.BOOK_TRIP_FAILED,
+                    mapOf(AnalyticsParams.PACKAGE_ID to route.packageId),
+                    error
+                )
                 _uiState.update {
                     it.copy(
                         isBooking = false,

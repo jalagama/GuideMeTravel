@@ -5,6 +5,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import com.guideme.travel.domain.model.TourPackageSummary
+import com.guideme.travel.domain.analytics.AnalyticsEvents
+import com.guideme.travel.domain.analytics.AnalyticsParams
+import com.guideme.travel.domain.logging.GuideMeLogger
+import com.guideme.travel.domain.logging.LogTags
 import com.guideme.travel.domain.usecase.GetGenrePackagesUseCase
 import com.guideme.travel.domain.usecase.ObserveGenrePackagesUseCase
 import com.guideme.travel.ui.navigation.GenreDetailRoute
@@ -28,7 +32,8 @@ data class GenreDetailUiState(
 class GenreDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val observeGenrePackagesUseCase: ObserveGenrePackagesUseCase,
-    private val getGenrePackagesUseCase: GetGenrePackagesUseCase
+    private val getGenrePackagesUseCase: GetGenrePackagesUseCase,
+    private val logger: GuideMeLogger
 ) : ViewModel() {
 
     private val route = savedStateHandle.toRoute<GenreDetailRoute>()
@@ -36,6 +41,14 @@ class GenreDetailViewModel @Inject constructor(
     val uiState: StateFlow<GenreDetailUiState> = _uiState.asStateFlow()
 
     init {
+        logger.info(
+            LogTags.GENRE_VM,
+            AnalyticsEvents.GENRE_OPENED,
+            mapOf(
+                AnalyticsParams.COUNTRY_CODE to route.countryCode,
+                AnalyticsParams.GENRE_ID to route.genreId
+            )
+        )
         loadPackages()
     }
 
@@ -61,6 +74,15 @@ class GenreDetailViewModel @Inject constructor(
             runCatching {
                 getGenrePackagesUseCase(route.countryCode, route.genreId)
             }.onSuccess { result ->
+                logger.info(
+                    LogTags.GENRE_VM,
+                    AnalyticsEvents.PACKAGES_LOADED,
+                    mapOf(
+                        AnalyticsParams.COUNTRY_CODE to route.countryCode,
+                        AnalyticsParams.GENRE_ID to route.genreId,
+                        AnalyticsParams.COUNT to result.packages.size
+                    )
+                )
                 _uiState.update {
                     it.copy(
                         isLoading = false,
@@ -71,6 +93,12 @@ class GenreDetailViewModel @Inject constructor(
                 }
             }.onFailure { error ->
                 val hasCache = _uiState.value.packages.isNotEmpty()
+                logger.warn(
+                    LogTags.GENRE_VM,
+                    "packages_load_failed",
+                    mapOf("genreId" to route.genreId, "hasCache" to hasCache),
+                    error
+                )
                 _uiState.update {
                     it.copy(
                         isLoading = false,

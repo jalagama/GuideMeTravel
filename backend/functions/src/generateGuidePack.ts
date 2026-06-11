@@ -5,8 +5,9 @@ import { HttpsError } from "firebase-functions/v2/https";
 import { bucket, db } from "./firebaseAdmin";
 import { fetchWikipediaSummary } from "./wikipedia";
 import { getVoiceForLanguage } from "./ttsVoices";
+import { generateGeminiText } from "./logging/geminiLogging";
+import { getGuideMeLogger } from "./logging/loggerContext";
 import {
-  logEvent,
   runWithConcurrency,
   validateLanguageCode,
   type SupportedLanguageCode,
@@ -66,7 +67,7 @@ export async function generateGuidePackForTrip(input: GenerateGuidePackInput) {
     guidePackGeneratedAtMillis: Date.now(),
   });
 
-  logEvent("guide_pack_generated", {
+  getGuideMeLogger().info("guide_pack_generated", {
     tripId: input.tripId,
     userId: input.userId,
     languageCode,
@@ -92,8 +93,11 @@ async function generateGuideForAttraction(
     .get();
 
   if (cached.exists) {
+    getGuideMeLogger().logCacheHit("guideContent", `${attraction.id}/${languageCode}`);
     return resolveCachedGuide(attraction.id, cached.data()!);
   }
+
+  getGuideMeLogger().logCacheMiss("guideContent", `${attraction.id}/${languageCode}`);
 
   const { transcript, source } = await resolveGuideTranscript(attraction, languageCode);
   const storagePath = `guide-audio/${attraction.id}/${languageCode}/guide.mp3`;
@@ -177,13 +181,20 @@ Use only these facts:
 ${groundedFacts}
 Keep it conversational and factual. Do not invent details.
 `;
-      const result = await model.generateContent(prompt);
-      script = result.response.text().trim();
+      script = (
+        await generateGeminiText("build_guide_script", model, prompt, {
+          attraction: attraction.name,
+          languageCode,
+        })
+      ).trim();
       source = "gemini+wikipedia";
     } catch (error) {
-      logEvent("gemini_script_failed", {
+      getGuideMeLogger().error("gemini_script_failed", {
         attraction: attraction.name,
         error: error instanceof Error ? error.message : "unknown",
+      });
+      getGuideMeLogger().logFallback("build_guide_script", "generation_failed", {
+        attraction: attraction.name,
       });
     }
   }
@@ -193,7 +204,7 @@ Keep it conversational and factual. Do not invent details.
       const [translation] = await translateClient.translate(script, languageCode);
       script = translation;
     } catch (error) {
-      logEvent("translate_failed", {
+      getGuideMeLogger().error("translate_failed", {
         attraction: attraction.name,
         languageCode,
         error: error instanceof Error ? error.message : "unknown",
@@ -217,7 +228,7 @@ async function trySynthesizeAndUpload(
       audioAvailable: true,
     };
   } catch (error) {
-    logEvent("tts_synthesis_failed", {
+    getGuideMeLogger().error("tts_synthesis_failed", {
       storagePath,
       languageCode,
       error: error instanceof Error ? error.message : "unknown",

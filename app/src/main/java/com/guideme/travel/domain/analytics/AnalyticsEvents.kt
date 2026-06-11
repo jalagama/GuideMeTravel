@@ -1,0 +1,78 @@
+package com.guideme.travel.domain.analytics
+
+object AnalyticsEvents {
+    const val SCREEN_VIEW = "screen_view"
+    const val SESSION_START = "session_start"
+
+    const val SIGN_IN_ANONYMOUS = "sign_in_anonymous"
+    const val SIGN_IN_GOOGLE = "sign_in_google"
+    const val SIGN_IN_EMAIL_LINK_SENT = "sign_in_email_link_sent"
+    const val SIGN_IN_EMAIL_COMPLETE = "sign_in_email_complete"
+    const val SIGN_IN_FAILED = "sign_in_failed"
+
+    const val GENRES_LOADED = "genres_loaded"
+    const val GENRE_OPENED = "genre_opened"
+    const val PACKAGES_LOADED = "packages_loaded"
+    const val PACKAGE_OPENED = "package_opened"
+    const val PACKAGE_DETAIL_LOADED = "package_detail_loaded"
+    const val DETAIL_EXPLORED = "detail_explored"
+    const val AUDIO_PREVIEW_PLAYED = "audio_preview_played"
+
+    const val BOOK_TRIP_STARTED = "book_trip_started"
+    const val BOOK_TRIP_COMPLETE = "book_trip_complete"
+    const val BOOK_TRIP_FAILED = "book_trip_failed"
+
+    const val CUSTOM_TRIP_CREATED = "custom_trip_created"
+    const val ITINERARY_VIEWED = "itinerary_viewed"
+    const val START_TRIP_ONLINE = "start_trip_online"
+    const val OFFLINE_DOWNLOAD_STARTED = "offline_download_started"
+    const val OFFLINE_DOWNLOAD_COMPLETE = "offline_download_complete"
+    const val OFFLINE_DOWNLOAD_FAILED = "offline_download_failed"
+
+    const val TRIP_MAP_STARTED = "trip_map_started"
+    const val GUIDE_SERVICE_STARTED = "guide_service_started"
+    const val GUIDE_PLAYED = "guide_played"
+    const val TRIP_COMPLETED = "trip_completed"
+    const val TRIP_SUMMARY_VIEWED = "trip_summary_viewed"
+    const val TRIP_DELETED = "trip_deleted"
+
+    const val CACHE_HIT = "cache_hit"
+    const val CACHE_MISS = "cache_miss"
+    const val PACKAGE_LIST_CACHED = "package_list_cached"
+    const val LOCAL_UPSERT = "local_upsert"
+    const val REMOTE_REQUEST = "remote_request"
+    const val REMOTE_RESPONSE = "remote_response"
+    const val REMOTE_ERROR = "remote_error"
+    const val PREFETCH_STARTED = "prefetch_started"
+    const val PREFETCH_COMPLETE = "prefetch_complete"
+    const val PREFETCH_FAILED = "prefetch_failed"
+
+    const val APP_WARNING = "app_warning"
+    const val APP_ERROR = "app_error"
+}
+
+object AnalyticsParams {
+    const val SCREEN_NAME = "screen_name"
+    const val SCREEN_CLASS = "screen_class"
+    const val COUNTRY_CODE = "country_code"
+    const val GENRE_ID = "genre_id"
+    const val GENRE_NAME = "genre_name"
+    const val PACKAGE_ID = "package_id"
+    const val TRIP_ID = "trip_id"
+    const val SPOT_ID = "spot_id"
+    const val COUNT = "count"
+    const val SOURCE = "source"
+    const val CACHE_SCOPE = "cache_scope"
+    const val CACHE_KEY = "cache_key"
+    const val FUNCTION_NAME = "function_name"
+    const val ERROR_MESSAGE = "error_message"
+    const val IS_FREE = "is_free"
+    const val PREFER_LOCAL = "prefer_local"
+    const val HAS_CACHE = "has_cache"
+    const val TAG = "tag"
+    const val MESSAGE = "message"
+    const val ENTITY = "entity"
+    const val WORK_NAME = "work_name"
+    const val AUTHENTICATED = "authenticated"
+    const val ONBOARDING_COMPLETE = "onboarding_complete"
+}

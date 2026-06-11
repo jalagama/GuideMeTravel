@@ -11,6 +11,11 @@ import com.guideme.travel.domain.usecase.ObserveCountryGenresUseCase
 import com.guideme.travel.domain.usecase.ObserveDefaultLanguageUseCase
 import com.guideme.travel.domain.usecase.ObserveTripsUseCase
 import com.guideme.travel.domain.usecase.RefreshCountryGenresUseCase
+import com.guideme.travel.domain.analytics.AnalyticsEvents
+import com.guideme.travel.domain.analytics.AnalyticsParams
+import com.guideme.travel.domain.analytics.GuideMeAnalytics
+import com.guideme.travel.domain.logging.GuideMeLogger
+import com.guideme.travel.domain.logging.LogTags
 import com.guideme.travel.domain.usecase.SetDefaultLanguageUseCase
 import com.guideme.travel.util.PlaceSuggestion
 import com.guideme.travel.util.PlacesAutocompleteHelper
@@ -51,7 +56,9 @@ class HomeViewModel @Inject constructor(
     private val observeTripsUseCase: ObserveTripsUseCase,
     private val observeDefaultLanguageUseCase: ObserveDefaultLanguageUseCase,
     private val setDefaultLanguageUseCase: SetDefaultLanguageUseCase,
-    private val placesAutocompleteHelper: PlacesAutocompleteHelper
+    private val placesAutocompleteHelper: PlacesAutocompleteHelper,
+    private val logger: GuideMeLogger,
+    private val analytics: GuideMeAnalytics
 ) : ViewModel() {
 
     private val formState = MutableStateFlow(HomeUiState())
@@ -108,6 +115,14 @@ class HomeViewModel @Inject constructor(
 
             runCatching { getCountryGenresUseCase() }
                 .onSuccess { result ->
+                    logger.info(
+                        LogTags.HOME_VM,
+                        AnalyticsEvents.GENRES_LOADED,
+                        mapOf(
+                            AnalyticsParams.COUNTRY_CODE to result.countryCode,
+                            AnalyticsParams.COUNT to result.genres.size
+                        )
+                    )
                     formState.update {
                         it.copy(
                             isLoadingGenres = false,
@@ -121,6 +136,12 @@ class HomeViewModel @Inject constructor(
                 }
                 .onFailure { error ->
                     val hasCache = formState.value.genres.isNotEmpty()
+                    logger.warn(
+                        LogTags.HOME_VM,
+                        "genres_load_failed",
+                        mapOf("hasCache" to hasCache),
+                        error
+                    )
                     formState.update {
                         it.copy(
                             isLoadingGenres = false,
@@ -208,9 +229,14 @@ class HomeViewModel @Inject constructor(
                     languageCode = formState.value.languageCode
                 )
             }.onSuccess { trip ->
+                analytics.logEvent(
+                    AnalyticsEvents.CUSTOM_TRIP_CREATED,
+                    mapOf(AnalyticsParams.TRIP_ID to trip.id, "destination" to destination)
+                )
                 formState.update { it.copy(isCreatingTrip = false, searchQuery = "") }
                 onSuccess(trip.id)
             }.onFailure { error ->
+                analytics.recordNonFatal(error, mapOf("destination" to destination))
                 formState.update {
                     it.copy(
                         isCreatingTrip = false,

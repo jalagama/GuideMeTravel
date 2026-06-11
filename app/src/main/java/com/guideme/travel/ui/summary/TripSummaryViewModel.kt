@@ -4,6 +4,9 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
+import com.guideme.travel.domain.analytics.AnalyticsEvents
+import com.guideme.travel.domain.analytics.AnalyticsParams
+import com.guideme.travel.domain.analytics.GuideMeAnalytics
 import com.guideme.travel.domain.model.TripPlan
 import com.guideme.travel.domain.usecase.DeleteOfflineDataUseCase
 import com.guideme.travel.domain.usecase.DeleteTripUseCase
@@ -30,7 +33,8 @@ class TripSummaryViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val observeTripUseCase: ObserveTripUseCase,
     private val deleteOfflineDataUseCase: DeleteOfflineDataUseCase,
-    private val deleteTripUseCase: DeleteTripUseCase
+    private val deleteTripUseCase: DeleteTripUseCase,
+    private val analytics: GuideMeAnalytics
 ) : ViewModel() {
 
     private val tripId: String = savedStateHandle.toRoute<TripSummaryRoute>().tripId
@@ -52,9 +56,17 @@ class TripSummaryViewModel @Inject constructor(
         initialValue = TripSummaryUiState()
     )
 
+    init {
+        analytics.logEvent(AnalyticsEvents.TRIP_SUMMARY_VIEWED, mapOf(AnalyticsParams.TRIP_ID to tripId))
+    }
+
     fun deleteOfflineData(tripId: String) {
         viewModelScope.launch {
             val freed = deleteOfflineDataUseCase(tripId)
+            analytics.logEvent(
+                "offline_data_deleted",
+                mapOf(AnalyticsParams.TRIP_ID to tripId, "freed_bytes" to freed)
+            )
             cleanupState.value = cleanupState.value.copy(
                 offlineDeleted = true,
                 freedBytes = freed
@@ -65,6 +77,10 @@ class TripSummaryViewModel @Inject constructor(
     fun deleteTrip(tripId: String, onDeleted: () -> Unit) {
         viewModelScope.launch {
             val freed = deleteTripUseCase(tripId)
+            analytics.logEvent(
+                AnalyticsEvents.TRIP_DELETED,
+                mapOf(AnalyticsParams.TRIP_ID to tripId, "freed_bytes" to freed)
+            )
             cleanupState.value = cleanupState.value.copy(
                 tripDeleted = true,
                 freedBytes = freed,

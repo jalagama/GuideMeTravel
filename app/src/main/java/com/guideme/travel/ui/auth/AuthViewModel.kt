@@ -3,6 +3,9 @@ package com.guideme.travel.ui.auth
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.guideme.travel.data.auth.PendingEmailLinkStore
+import com.guideme.travel.domain.analytics.AnalyticsEvents
+import com.guideme.travel.domain.analytics.AnalyticsParams
+import com.guideme.travel.domain.analytics.GuideMeAnalytics
 import com.guideme.travel.domain.repository.PreferencesRepository
 import com.guideme.travel.domain.usecase.CompleteSignInFromLinkUseCase
 import com.guideme.travel.domain.usecase.ObserveAuthStateUseCase
@@ -38,7 +41,8 @@ class AuthViewModel @Inject constructor(
     private val completeSignInFromLinkUseCase: CompleteSignInFromLinkUseCase,
     private val observeDefaultLanguageUseCase: ObserveDefaultLanguageUseCase,
     private val preferencesRepository: PreferencesRepository,
-    private val pendingEmailLinkStore: PendingEmailLinkStore
+    private val pendingEmailLinkStore: PendingEmailLinkStore,
+    private val analytics: GuideMeAnalytics
 ) : ViewModel() {
 
     private val formState = MutableStateFlow(AuthUiState())
@@ -74,10 +78,16 @@ class AuthViewModel @Inject constructor(
             val language = observeDefaultLanguageUseCase().first()
             runCatching { signInAnonymouslyUseCase(language) }
                 .onSuccess {
+                    analytics.logEvent(AnalyticsEvents.SIGN_IN_ANONYMOUS)
                     formState.update { it.copy(isLoading = false) }
                     onSuccess()
                 }
                 .onFailure { error ->
+                    analytics.logEvent(
+                        AnalyticsEvents.SIGN_IN_FAILED,
+                        mapOf(AnalyticsParams.SOURCE to "anonymous", AnalyticsParams.ERROR_MESSAGE to error.message)
+                    )
+                    analytics.recordNonFatal(error, mapOf(AnalyticsParams.SOURCE to "anonymous"))
                     formState.update {
                         it.copy(isLoading = false, errorMessage = error.message ?: "Sign in failed")
                     }
@@ -91,10 +101,16 @@ class AuthViewModel @Inject constructor(
             val language = observeDefaultLanguageUseCase().first()
             runCatching { signInWithGoogleUseCase(idToken, language) }
                 .onSuccess {
+                    analytics.logEvent(AnalyticsEvents.SIGN_IN_GOOGLE)
                     formState.update { it.copy(isLoading = false) }
                     onSuccess()
                 }
                 .onFailure { error ->
+                    analytics.logEvent(
+                        AnalyticsEvents.SIGN_IN_FAILED,
+                        mapOf(AnalyticsParams.SOURCE to "google", AnalyticsParams.ERROR_MESSAGE to error.message)
+                    )
+                    analytics.recordNonFatal(error, mapOf(AnalyticsParams.SOURCE to "google"))
                     formState.update {
                         it.copy(isLoading = false, errorMessage = error.message ?: "Google sign-in failed")
                     }
@@ -113,11 +129,16 @@ class AuthViewModel @Inject constructor(
             formState.update { it.copy(isLoading = true, errorMessage = null) }
             runCatching { sendSignInLinkUseCase(current.email.trim()) }
                 .onSuccess {
+                    analytics.logEvent(AnalyticsEvents.SIGN_IN_EMAIL_LINK_SENT)
                     formState.update {
                         it.copy(isLoading = false, linkSent = true, errorMessage = null)
                     }
                 }
                 .onFailure { error ->
+                    analytics.logEvent(
+                        AnalyticsEvents.SIGN_IN_FAILED,
+                        mapOf(AnalyticsParams.SOURCE to "email_link", AnalyticsParams.ERROR_MESSAGE to error.message)
+                    )
                     formState.update {
                         it.copy(
                             isLoading = false,
@@ -149,11 +170,17 @@ class AuthViewModel @Inject constructor(
         val language = observeDefaultLanguageUseCase().first()
         runCatching { completeSignInFromLinkUseCase(email, link, language) }
             .onSuccess {
+                analytics.logEvent(AnalyticsEvents.SIGN_IN_EMAIL_COMPLETE)
                 pendingEmailLinkStore.consumeLink()
                 formState.update { it.copy(isLoading = false) }
                 onSuccess?.invoke()
             }
             .onFailure { error ->
+                analytics.logEvent(
+                    AnalyticsEvents.SIGN_IN_FAILED,
+                    mapOf(AnalyticsParams.SOURCE to "email_complete", AnalyticsParams.ERROR_MESSAGE to error.message)
+                )
+                analytics.recordNonFatal(error, mapOf(AnalyticsParams.SOURCE to "email_complete"))
                 formState.update {
                     it.copy(
                         isLoading = false,

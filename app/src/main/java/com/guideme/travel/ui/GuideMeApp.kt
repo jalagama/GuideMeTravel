@@ -58,6 +58,9 @@ fun GuideMeApp(
     val launchViewModel: AppLaunchViewModel = hiltViewModel()
     val launchState by launchViewModel.launchState.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
+    LaunchedEffect(navBackStackEntry) {
+        launchViewModel.trackScreen(navBackStackEntry)
+    }
     val onAuthScreen = navBackStackEntry?.destination?.route?.contains("AuthRoute") == true
     val showShell = launchState.isAuthenticated && !onAuthScreen
     val shellState = resolveShellState(navBackStackEntry)

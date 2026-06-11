@@ -1,5 +1,6 @@
 package com.guideme.travel.data.local
 
+import com.guideme.travel.domain.logging.GuideMeLogger
 import com.guideme.travel.domain.model.CountryGenres
 import com.guideme.travel.domain.model.GenrePackages
 import com.guideme.travel.domain.model.TourPackageDetail
@@ -10,7 +11,8 @@ import javax.inject.Singleton
 
 @Singleton
 class CuratedContentLocalDataSource @Inject constructor(
-    private val dao: CuratedContentDao
+    private val dao: CuratedContentDao,
+    private val logger: GuideMeLogger
 ) {
     fun observeCountryGenres(countryCode: String): Flow<CountryGenres?> {
         return combine(
@@ -63,12 +65,22 @@ class CuratedContentLocalDataSource @Inject constructor(
             cache = data.toCacheEntity(schemaVersion),
             genres = data.genres.map { it.toEntity(data.countryCode) }
         )
+        logger.logLocalUpsert(
+            "CountryGenres",
+            data.countryCode,
+            mapOf("genreCount" to data.genres.size, "schemaVersion" to schemaVersion)
+        )
     }
 
     suspend fun upsertGenrePackages(data: GenrePackages, schemaVersion: Int = CURATED_SCHEMA_VERSION) {
         dao.upsertGenrePackages(
             cache = data.toCacheEntity(schemaVersion),
             packages = data.packages.map { it.toEntity(data.countryCode, data.genreId) }
+        )
+        logger.logLocalUpsert(
+            "GenrePackages",
+            "${data.countryCode}_${data.genreId}",
+            mapOf("packageCount" to data.packages.size, "schemaVersion" to schemaVersion)
         )
     }
 
@@ -79,6 +91,16 @@ class CuratedContentLocalDataSource @Inject constructor(
             detail = detail.toEntity(schemaVersion),
             spots = detail.spots.map { it.toEntity(detail.id) },
             nearbyPlaces = nearbyPlaces
+        )
+        logger.logLocalUpsert(
+            "TourPackageDetail",
+            detail.id,
+            mapOf(
+                "spotCount" to detail.spots.size,
+                "hotelCount" to detail.hotels.size,
+                "restaurantCount" to detail.restaurants.size,
+                "schemaVersion" to schemaVersion
+            )
         )
     }
 

@@ -5,6 +5,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import com.guideme.travel.domain.model.TourPackageDetail
+import com.guideme.travel.domain.analytics.AnalyticsEvents
+import com.guideme.travel.domain.analytics.AnalyticsParams
+import com.guideme.travel.domain.logging.GuideMeLogger
+import com.guideme.travel.domain.logging.LogTags
 import com.guideme.travel.domain.usecase.GetTourPackageDetailUseCase
 import com.guideme.travel.domain.usecase.ObserveTourPackageDetailUseCase
 import com.guideme.travel.ui.navigation.TourPackageDetailRoute
@@ -27,7 +31,8 @@ data class TourPackageDetailUiState(
 class TourPackageDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val observeTourPackageDetailUseCase: ObserveTourPackageDetailUseCase,
-    private val getTourPackageDetailUseCase: GetTourPackageDetailUseCase
+    private val getTourPackageDetailUseCase: GetTourPackageDetailUseCase,
+    private val logger: GuideMeLogger
 ) : ViewModel() {
 
     private val route = savedStateHandle.toRoute<TourPackageDetailRoute>()
@@ -35,6 +40,15 @@ class TourPackageDetailViewModel @Inject constructor(
     val uiState: StateFlow<TourPackageDetailUiState> = _uiState.asStateFlow()
 
     init {
+        logger.info(
+            LogTags.PACKAGE_DETAIL_VM,
+            AnalyticsEvents.PACKAGE_OPENED,
+            mapOf(
+                AnalyticsParams.PACKAGE_ID to route.packageId,
+                AnalyticsParams.COUNTRY_CODE to route.countryCode,
+                AnalyticsParams.GENRE_ID to route.genreId
+            )
+        )
         loadDetail()
     }
 
@@ -58,10 +72,29 @@ class TourPackageDetailViewModel @Inject constructor(
                 )
             }
                 .onSuccess { detail ->
+                    logger.info(
+                        LogTags.PACKAGE_DETAIL_VM,
+                        AnalyticsEvents.PACKAGE_DETAIL_LOADED,
+                        mapOf(
+                            AnalyticsParams.PACKAGE_ID to route.packageId,
+                            AnalyticsParams.COUNT to detail.spots.size
+                        )
+                    )
+                    logger.info(
+                        LogTags.PACKAGE_DETAIL_VM,
+                        AnalyticsEvents.DETAIL_EXPLORED,
+                        mapOf(AnalyticsParams.PACKAGE_ID to route.packageId)
+                    )
                     _uiState.update { it.copy(isLoading = false, detail = detail) }
                 }
                 .onFailure { error ->
                     val hasCache = _uiState.value.detail != null
+                    logger.warn(
+                        LogTags.PACKAGE_DETAIL_VM,
+                        "detail_load_failed",
+                        mapOf("packageId" to route.packageId, "hasCache" to hasCache),
+                        error
+                    )
                     _uiState.update {
                         it.copy(
                             isLoading = false,
@@ -73,6 +106,13 @@ class TourPackageDetailViewModel @Inject constructor(
     }
 
     fun setPlayingSpot(spotId: String?) {
+        if (spotId != null) {
+            logger.info(
+                LogTags.PACKAGE_DETAIL_VM,
+                AnalyticsEvents.AUDIO_PREVIEW_PLAYED,
+                mapOf(AnalyticsParams.PACKAGE_ID to route.packageId, AnalyticsParams.SPOT_ID to spotId)
+            )
+        }
         _uiState.update { it.copy(playingSpotId = spotId) }
     }
 }

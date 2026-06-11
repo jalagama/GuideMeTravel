@@ -6,6 +6,8 @@ import com.guideme.travel.data.local.CuratedContentLocalDataSource
 import com.guideme.travel.data.local.TripDao
 import com.guideme.travel.data.local.toEntity
 import com.guideme.travel.data.remote.FirebaseCuratedContentDataSource
+import com.guideme.travel.domain.logging.GuideMeLogger
+import com.guideme.travel.domain.logging.LogTags
 import com.guideme.travel.domain.model.CountryGenres
 import com.guideme.travel.domain.model.GenrePackages
 import com.guideme.travel.domain.model.TourPackageDetail
@@ -27,7 +29,8 @@ class CuratedContentRepositoryImpl @Inject constructor(
     private val remoteDataSource: FirebaseCuratedContentDataSource,
     private val localDataSource: CuratedContentLocalDataSource,
     private val tripDao: TripDao,
-    private val attractionDao: AttractionDao
+    private val attractionDao: AttractionDao,
+    private val logger: GuideMeLogger
 ) : CuratedContentRepository {
 
     private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -47,16 +50,21 @@ class CuratedContentRepositoryImpl @Inject constructor(
     override suspend fun getCountryGenres(countryCode: String): CountryGenres {
         val cached = localDataSource.observeCountryGenres(countryCode).firstOrNull()
         if (cached != null && cached.schemaVersion >= CURATED_SCHEMA_VERSION) {
+            logger.logCacheHit("countryGenres", countryCode, mapOf("genreCount" to cached.genres.size))
             return cached
         }
+        logger.logCacheMiss("countryGenres", countryCode)
         return refreshCountryGenres(countryCode)
     }
 
     override suspend fun getGenrePackages(countryCode: String, genreId: String): GenrePackages {
+        val cacheKey = "${countryCode}_$genreId"
         val cached = localDataSource.observeGenrePackages(countryCode, genreId).firstOrNull()
         if (cached != null && cached.schemaVersion >= CURATED_SCHEMA_VERSION) {
+            logger.logCacheHit("genrePackages", cacheKey, mapOf("packageCount" to cached.packages.size))
             return cached
         }
+        logger.logCacheMiss("genrePackages", cacheKey)
         return refreshGenrePackages(countryCode, genreId)
     }
 
@@ -67,20 +75,38 @@ class CuratedContentRepositoryImpl @Inject constructor(
     ): TourPackageDetail {
         val cached = localDataSource.observeTourPackageDetail(packageId).firstOrNull()
         if (cached != null) {
+            logger.logCacheHit("tourPackageDetail", packageId, mapOf("spotCount" to cached.spots.size))
             return cached
         }
+        logger.logCacheMiss("tourPackageDetail", packageId, mapOf("countryCode" to countryCode, "genreId" to genreId))
         return refreshTourPackageDetail(packageId, countryCode, genreId)
     }
 
     override suspend fun refreshCountryGenres(countryCode: String): CountryGenres {
+        logger.info(LogTags.CURATED_REPO, "refresh_country_genres", mapOf("countryCode" to countryCode))
         val remote = remoteDataSource.getCountryGenres(countryCode)
         localDataSource.upsertCountryGenres(remote)
+        logger.info(
+            LogTags.CURATED_REPO,
+            "refresh_country_genres_complete",
+            mapOf("countryCode" to countryCode, "genreCount" to remote.genres.size)
+        )
         return remote
     }
 
     override suspend fun refreshGenrePackages(countryCode: String, genreId: String): GenrePackages {
+        logger.info(
+            LogTags.CURATED_REPO,
+            "refresh_genre_packages",
+            mapOf("countryCode" to countryCode, "genreId" to genreId)
+        )
         val remote = remoteDataSource.getGenrePackages(countryCode, genreId)
         localDataSource.upsertGenrePackages(remote)
+        logger.info(
+            LogTags.CURATED_REPO,
+            "refresh_genre_packages_complete",
+            mapOf("countryCode" to countryCode, "genreId" to genreId, "packageCount" to remote.packages.size)
+        )
         return remote
     }
 
@@ -89,8 +115,18 @@ class CuratedContentRepositoryImpl @Inject constructor(
         countryCode: String,
         genreId: String
     ): TourPackageDetail {
+        logger.info(
+            LogTags.CURATED_REPO,
+            "refresh_package_detail",
+            mapOf("packageId" to packageId, "countryCode" to countryCode, "genreId" to genreId)
+        )
         val remote = remoteDataSource.getTourPackageDetail(packageId, countryCode, genreId)
         localDataSource.upsertTourPackageDetail(remote)
+        logger.info(
+            LogTags.CURATED_REPO,
+            "refresh_package_detail_complete",
+            mapOf("packageId" to packageId, "spotCount" to remote.spots.size)
+        )
         return remote
     }
 
@@ -101,6 +137,11 @@ class CuratedContentRepositoryImpl @Inject constructor(
         origin: String,
         languageCode: String
     ): TripPlan {
+        logger.info(
+            LogTags.CURATED_REPO,
+            "create_trip_remote",
+            mapOf("packageId" to packageId, "languageCode" to languageCode)
+        )
         val trip = remoteDataSource.createTripFromPackage(
             packageId,
             countryCode,
@@ -109,6 +150,7 @@ class CuratedContentRepositoryImpl @Inject constructor(
             languageCode
         )
         persistTrip(trip)
+        logger.info(LogTags.CURATED_REPO, "create_trip_remote_complete", mapOf("tripId" to trip.id))
         return trip
     }
 
@@ -119,6 +161,11 @@ class CuratedContentRepositoryImpl @Inject constructor(
         origin: String,
         languageCode: String
     ): TripPlan {
+        logger.info(
+            LogTags.CURATED_REPO,
+            "create_trip_local",
+            mapOf("packageId" to packageId, "languageCode" to languageCode)
+        )
         val detail = localDataSource.observeTourPackageDetail(packageId).firstOrNull()
             ?: getTourPackageDetail(packageId, countryCode, genreId)
 
@@ -149,6 +196,11 @@ class CuratedContentRepositoryImpl @Inject constructor(
             offlinePackDownloaded = false
         )
         persistTrip(trip)
+        logger.info(
+            LogTags.CURATED_REPO,
+            "create_trip_local_complete",
+            mapOf("tripId" to tripId, "attractionCount" to attractions.size)
+        )
 
         syncScope.launch {
             runCatching {
@@ -158,6 +210,15 @@ class CuratedContentRepositoryImpl @Inject constructor(
                     genreId,
                     origin,
                     languageCode
+                )
+            }.onSuccess {
+                logger.info(LogTags.CURATED_REPO, "create_trip_background_sync_success", mapOf("packageId" to packageId))
+            }.onFailure { error ->
+                logger.warn(
+                    LogTags.CURATED_REPO,
+                    "create_trip_background_sync_failed",
+                    mapOf("packageId" to packageId),
+                    error
                 )
             }
         }

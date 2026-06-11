@@ -8,6 +8,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import com.guideme.travel.data.offline.MapLibreOfflineMapManager
 import com.guideme.travel.data.offline.OfflineMapMetadata
+import com.guideme.travel.domain.analytics.AnalyticsEvents
+import com.guideme.travel.domain.analytics.AnalyticsParams
+import com.guideme.travel.domain.analytics.GuideMeAnalytics
 import com.guideme.travel.domain.model.AttractionStatus
 import com.guideme.travel.domain.model.TripPlan
 import com.guideme.travel.domain.model.UserLocation
@@ -47,7 +50,8 @@ class TripMapViewModel @Inject constructor(
     private val observeLocationUseCase: ObserveLocationUseCase,
     private val completeTripUseCase: CompleteTripUseCase,
     private val isTripCompleteUseCase: IsTripCompleteUseCase,
-    private val mapLibreOfflineMapManager: MapLibreOfflineMapManager
+    private val mapLibreOfflineMapManager: MapLibreOfflineMapManager,
+    private val analytics: GuideMeAnalytics
 ) : ViewModel() {
 
     private val tripId: String = savedStateHandle.toRoute<TripMapRoute>().tripId
@@ -81,6 +85,7 @@ class TripMapViewModel @Inject constructor(
     )
 
     init {
+        analytics.logEvent(AnalyticsEvents.TRIP_MAP_STARTED, mapOf(AnalyticsParams.TRIP_ID to tripId))
         viewModelScope.launch {
             observeTripUseCase(tripId).collect {
                 if (isTripCompleteUseCase(tripId)) {
@@ -92,6 +97,10 @@ class TripMapViewModel @Inject constructor(
 
     fun toggleFollowUser() {
         followUser.value = !followUser.value
+        analytics.logEvent(
+            "map_recenter_toggled",
+            mapOf(AnalyticsParams.TRIP_ID to tripId, "follow_user" to followUser.value)
+        )
     }
 
     fun startGuideService(trip: TripPlan) {
@@ -99,6 +108,13 @@ class TripMapViewModel @Inject constructor(
         if (!LocationPermissionHelper.canStartLocationForegroundService(context)) return
 
         guideServiceStarted.value = true
+        analytics.logEvent(
+            AnalyticsEvents.GUIDE_SERVICE_STARTED,
+            mapOf(
+                AnalyticsParams.TRIP_ID to trip.id,
+                AnalyticsParams.COUNT to trip.attractions.size
+            )
+        )
         val intent = Intent(context, TripGuideForegroundService::class.java).apply {
             putExtra(TripGuideForegroundService.EXTRA_TRIP_ID, trip.id)
             putExtra(
@@ -124,6 +140,7 @@ class TripMapViewModel @Inject constructor(
     fun completeTrip(onComplete: () -> Unit) {
         viewModelScope.launch {
             completeTripUseCase(tripId)
+            analytics.logEvent(AnalyticsEvents.TRIP_COMPLETED, mapOf(AnalyticsParams.TRIP_ID to tripId))
             context.stopService(Intent(context, TripGuideForegroundService::class.java))
             guideServiceStarted.value = false
             onComplete()

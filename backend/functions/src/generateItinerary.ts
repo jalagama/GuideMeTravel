@@ -9,7 +9,9 @@ import {
   optimizeRoute,
   slugify,
 } from "./mapsHelpers";
-import { logEvent, validateLanguageCode } from "./utils";
+import { generateGeminiText } from "./logging/geminiLogging";
+import { getGuideMeLogger } from "./logging/loggerContext";
+import { validateLanguageCode } from "./utils";
 
 type GenerateItineraryInput = {
   userId: string;
@@ -60,7 +62,7 @@ export async function generateItineraryForDestination(input: GenerateItineraryIn
   await tripRef.set(tripDoc);
   await cacheGlobalAttractions(attractions);
 
-  logEvent("itinerary_generated", {
+  getGuideMeLogger().info("itinerary_generated", {
     tripId: tripRef.id,
     userId: input.userId,
     destination: input.destination,
@@ -84,20 +86,30 @@ async function curateAttractions(
   countryCode: string,
   languageCode: string
 ): Promise<AttractionDoc[]> {
+  getGuideMeLogger().info("curate_attractions_started", { destination, countryCode });
   const placesAttractions = await fetchPlacesAttractionsInCountry(
     destination,
     countryCode,
     MAX_ATTRACTIONS
   );
   if (placesAttractions.length > 0) {
+    getGuideMeLogger().info("curate_attractions_places_hit", {
+      destination,
+      count: placesAttractions.length,
+    });
     return enrichWithWikipedia(
       await optimizeRoute(placesAttractions),
       languageCode
     );
   }
 
+  getGuideMeLogger().warn("curate_attractions_places_miss", { destination, countryCode });
   const geminiAttractions = await fetchGeminiAttractions(destination, countryCode);
   if (geminiAttractions.length > 0) {
+    getGuideMeLogger().info("curate_attractions_gemini_hit", {
+      destination,
+      count: geminiAttractions.length,
+    });
     return enrichWithWikipedia(
       await optimizeRoute(geminiAttractions),
       languageCode
@@ -134,8 +146,12 @@ Never include places outside ${countryName}.
 `;
 
   try {
-    const result = await model.generateContent(prompt);
-    const text = extractJsonArray(result.response.text());
+    const text = extractJsonArray(
+      await generateGeminiText("fetch_itinerary_attractions", model, prompt, {
+        destination,
+        countryCode,
+      })
+    );
     const parsed = JSON.parse(text) as AttractionDoc[];
     return parsed.slice(0, MAX_ATTRACTIONS).map((item, index) => ({
       ...item,
@@ -144,7 +160,7 @@ Never include places outside ${countryName}.
       estimatedMinutes: item.estimatedMinutes ?? 45,
     }));
   } catch (error) {
-    logEvent("gemini_curation_failed", {
+    getGuideMeLogger().error("gemini_curation_failed", {
       destination,
       error: error instanceof Error ? error.message : "unknown",
     });

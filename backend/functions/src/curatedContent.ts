@@ -34,7 +34,8 @@ import {
   buildSpotsPrompt,
   buildWhyChosenPrompt,
 } from "./prompts/curatedPrompts";
-import { logEvent } from "./utils";
+import { generateGeminiText } from "./logging/geminiLogging";
+import { getGuideMeLogger } from "./logging/loggerContext";
 
 type GenreDoc = {
   id: string;
@@ -93,9 +94,13 @@ export async function getCountryGenres(countryCode: string) {
   const cacheRef = db.collection("curatedGenres").doc(normalized);
   const cached = await cacheRef.get();
   if (cached.exists && (cached.data()?.schemaVersion ?? 1) >= CURATED_SCHEMA_VERSION) {
+    getGuideMeLogger().logCacheHit("curatedGenres", normalized, {
+      schemaVersion: cached.data()?.schemaVersion,
+    });
     return cached.data();
   }
 
+  getGuideMeLogger().logCacheMiss("curatedGenres", normalized);
   const countryName = countryNameFromCode(normalized);
   const genres = await generateGenresWithGemini(countryName, normalized);
   const doc = {
@@ -106,7 +111,10 @@ export async function getCountryGenres(countryCode: string) {
     updatedAtMillis: Date.now(),
   };
   await cacheRef.set(doc);
-  logEvent("country_genres_generated", { countryCode: normalized, count: genres.length });
+  getGuideMeLogger().info("country_genres_generated", {
+    countryCode: normalized,
+    count: genres.length,
+  });
   return doc;
 }
 
@@ -116,9 +124,13 @@ export async function getGenrePackages(countryCode: string, genreId: string) {
   const cacheRef = db.collection("curatedPackages").doc(cacheId);
   const cached = await cacheRef.get();
   if (cached.exists && (cached.data()?.schemaVersion ?? 1) >= CURATED_SCHEMA_VERSION) {
+    getGuideMeLogger().logCacheHit("curatedPackages", cacheId, {
+      schemaVersion: cached.data()?.schemaVersion,
+    });
     return cached.data();
   }
 
+  getGuideMeLogger().logCacheMiss("curatedPackages", cacheId);
   const genresDoc = await getCountryGenres(normalized);
   const genre = (genresDoc?.genres as GenreDoc[] | undefined)?.find((g) => g.id === genreId);
   if (!genre) {
@@ -139,7 +151,11 @@ export async function getGenrePackages(countryCode: string, genreId: string) {
     updatedAtMillis: Date.now(),
   };
   await cacheRef.set(doc);
-  logEvent("genre_packages_generated", { countryCode: normalized, genreId, count: packages.length });
+  getGuideMeLogger().info("genre_packages_generated", {
+    countryCode: normalized,
+    genreId,
+    count: packages.length,
+  });
   return doc;
 }
 
@@ -151,11 +167,16 @@ export async function getTourPackageDetail(
   const cacheRef = db.collection("tourPackages").doc(packageId);
   const cached = await cacheRef.get();
   if (cached.exists && (cached.data()?.schemaVersion ?? 1) >= CURATED_SCHEMA_VERSION) {
+    getGuideMeLogger().logCacheHit("tourPackages", packageId, {
+      schemaVersion: cached.data()?.schemaVersion,
+    });
     return cached.data();
   }
 
+  getGuideMeLogger().logCacheMiss("tourPackages", packageId, { countryCode, genreId });
   const resolved = await resolvePackageSummary(packageId, countryCode, genreId);
   if (!resolved) {
+    getGuideMeLogger().error("tour_package_not_found", { packageId, countryCode, genreId });
     throw new HttpsError(
       "not-found",
       `Tour package ${packageId} not found. Browse packages from a genre tile first.`
@@ -178,12 +199,19 @@ export async function ensureTourPackageDetail(
   const cacheRef = db.collection("tourPackages").doc(packageSummary.id);
   const cached = await cacheRef.get();
   if (cached.exists && (cached.data()?.schemaVersion ?? 1) >= CURATED_SCHEMA_VERSION) {
+    getGuideMeLogger().logCacheHit("tourPackages", packageSummary.id, {
+      schemaVersion: cached.data()?.schemaVersion,
+    });
     return cached.data() as TourPackageDetailDoc;
   }
 
+  getGuideMeLogger().logCacheMiss("tourPackages", packageSummary.id, { countryCode, genreId });
   const detail = await generateTourPackageDetail(countryCode, genreId, packageSummary);
   await cacheRef.set(detail);
-  logEvent("tour_package_detail_generated", { packageId: packageSummary.id });
+  getGuideMeLogger().info("tour_package_detail_generated", {
+    packageId: packageSummary.id,
+    spotCount: detail.spots.length,
+  });
   return detail;
 }
 
@@ -195,6 +223,12 @@ export async function createTripFromPackage(input: {
   countryCode?: string;
   genreId?: string;
 }) {
+  getGuideMeLogger().info("create_trip_from_package_started", {
+    packageId: input.packageId,
+    userId: input.userId,
+    countryCode: input.countryCode,
+    genreId: input.genreId,
+  });
   const detailData = await getTourPackageDetail(
     input.packageId,
     input.countryCode,
@@ -246,12 +280,18 @@ export async function createTripFromPackage(input: {
     )
   );
 
+  getGuideMeLogger().info("create_trip_from_package_complete", {
+    tripId: tripRef.id,
+    packageId: input.packageId,
+    attractionCount: attractions.length,
+  });
   return { tripId: tripRef.id, ...tripDoc };
 }
 
 async function generateGenresWithGemini(countryName: string, countryCode: string): Promise<GenreDoc[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
+    getGuideMeLogger().logFallback("generate_genres", "missing_gemini_api_key", { countryCode });
     return fallbackGenres(countryCode);
   }
 
@@ -259,8 +299,12 @@ async function generateGenresWithGemini(countryName: string, countryCode: string
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
   try {
-    const result = await model.generateContent(buildGenresPrompt(countryName, countryCode));
-    const parsed = JSON.parse(extractJsonArray(result.response.text())) as {
+    const prompt = buildGenresPrompt(countryName, countryCode);
+    const responseText = await generateGeminiText("generate_genres", model, prompt, {
+      countryCode,
+      countryName,
+    });
+    const parsed = JSON.parse(extractJsonArray(responseText)) as {
       genres: Array<GenreDoc & { imageSearchHint?: string; rank?: number }>;
     };
     const mapsKey = process.env.GOOGLE_MAPS_API_KEY;
@@ -281,10 +325,11 @@ async function generateGenresWithGemini(countryName: string, countryCode: string
       }))
     );
   } catch (error) {
-    logEvent("genre_generation_failed", {
+    getGuideMeLogger().error("genre_generation_failed", {
       countryCode,
       error: error instanceof Error ? error.message : "unknown",
     });
+    getGuideMeLogger().logFallback("generate_genres", "generation_failed", { countryCode });
     return fallbackGenres(countryCode);
   }
 }
@@ -296,6 +341,10 @@ async function generatePackagesWithGemini(
 ): Promise<PackageSummaryDoc[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
+    getGuideMeLogger().logFallback("generate_packages", "missing_gemini_api_key", {
+      countryCode,
+      genreId: genre.id,
+    });
     return buildFallbackPackages(countryCode, genre);
   }
 
@@ -352,10 +401,14 @@ async function generatePackagesWithGemini(
     );
     return enriched;
   } catch (error) {
-    logEvent("package_generation_failed", {
+    getGuideMeLogger().error("package_generation_failed", {
       countryCode,
       genreId: genre.id,
       error: error instanceof Error ? error.message : "unknown",
+    });
+    getGuideMeLogger().logFallback("generate_packages", "generation_failed", {
+      countryCode,
+      genreId: genre.id,
     });
     return await buildFallbackPackages(countryCode, genre);
   }
@@ -367,10 +420,12 @@ async function fetchPackagesFromGemini(
   countryCode: string,
   genre: GenreDoc
 ): Promise<PackageSummaryDoc[]> {
-  const result = await model.generateContent(
-    buildPackagesPrompt(countryName, countryCode, genre.name, genre.type)
-  );
-  const parsed = JSON.parse(extractJsonArray(result.response.text())) as {
+  const prompt = buildPackagesPrompt(countryName, countryCode, genre.name, genre.type);
+  const responseText = await generateGeminiText("fetch_packages", model, prompt, {
+    countryCode,
+    genreId: genre.id,
+  });
+  const parsed = JSON.parse(extractJsonArray(responseText)) as {
     packages: PackageSummaryDoc[];
   };
   return (parsed.packages ?? []).map((pkg, index) => ({
@@ -390,10 +445,19 @@ async function fetchPackagesFillFromGemini(
   needed: number
 ): Promise<PackageSummaryDoc[]> {
   if (needed <= 0) return [];
-  const result = await model.generateContent(
-    buildPackagesFillPrompt(countryName, countryCode, genre.name, existingTitles, needed)
+  const prompt = buildPackagesFillPrompt(
+    countryName,
+    countryCode,
+    genre.name,
+    existingTitles,
+    needed
   );
-  const parsed = JSON.parse(extractJsonArray(result.response.text())) as {
+  const responseText = await generateGeminiText("fetch_packages_fill", model, prompt, {
+    countryCode,
+    genreId: genre.id,
+    needed,
+  });
+  const parsed = JSON.parse(extractJsonArray(responseText)) as {
     packages: PackageSummaryDoc[];
   };
   return (parsed.packages ?? []).map((pkg, index) => ({
@@ -415,7 +479,7 @@ async function verifyPackagesInCountry(
       await geocodeDestinationInCountry(`${pkg.title}, ${pkg.region}`, countryCode);
       verified.push(pkg);
     } catch {
-      logEvent("package_geocode_failed", { title: pkg.title, countryCode });
+      getGuideMeLogger().warn("package_geocode_failed", { title: pkg.title, countryCode });
     }
     if (verified.length >= TARGET_PACKAGE_COUNT) break;
   }
@@ -569,17 +633,25 @@ async function fetchGeminiSpots(
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
   try {
-    const result = await model.generateContent(
-      buildSpotsPrompt(destination, countryName, countryCode, maxResults)
-    );
-    const parsed = JSON.parse(extractJsonArray(result.response.text())) as AttractionDoc[];
+    const prompt = buildSpotsPrompt(destination, countryName, countryCode, maxResults);
+    const responseText = await generateGeminiText("fetch_spots", model, prompt, {
+      destination,
+      countryCode,
+      maxResults,
+    });
+    const parsed = JSON.parse(extractJsonArray(responseText)) as AttractionDoc[];
     return parsed.slice(0, maxResults).map((item, index) => ({
       ...item,
       id: item.id || slugify(item.name),
       orderIndex: index,
       estimatedMinutes: item.estimatedMinutes ?? 45,
     }));
-  } catch {
+  } catch (error) {
+    getGuideMeLogger().error("fetch_spots_failed", {
+      destination,
+      countryCode,
+      error: error instanceof Error ? error.message : "unknown",
+    });
     return [];
   }
 }
@@ -594,11 +666,23 @@ async function generateWhyChosen(spot: AttractionDoc, packageTitle: string): Pro
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
   try {
-    const result = await model.generateContent(
-      buildWhyChosenPrompt(spot.name, packageTitle, spot.rating, spot.userRatingsTotal)
+    const prompt = buildWhyChosenPrompt(
+      spot.name,
+      packageTitle,
+      spot.rating,
+      spot.userRatingsTotal
     );
-    return result.response.text().trim();
-  } catch {
+    const responseText = await generateGeminiText("generate_why_chosen", model, prompt, {
+      spotName: spot.name,
+      packageTitle,
+    });
+    return responseText.trim();
+  } catch (error) {
+    getGuideMeLogger().logFallback("generate_why_chosen", "generation_failed", {
+      spotName: spot.name,
+      packageTitle,
+      error: error instanceof Error ? error.message : "unknown",
+    });
     return `Top-reviewed highlight on the ${packageTitle} itinerary.`;
   }
 }
@@ -617,11 +701,18 @@ async function generatePreviewSnippet(
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
   try {
-    const result = await model.generateContent(
-      buildPreviewSnippetPrompt(spotName, description, packageTitle)
-    );
-    return result.response.text().trim();
-  } catch {
+    const prompt = buildPreviewSnippetPrompt(spotName, description, packageTitle);
+    const responseText = await generateGeminiText("generate_preview_snippet", model, prompt, {
+      spotName,
+      packageTitle,
+    });
+    return responseText.trim();
+  } catch (error) {
+    getGuideMeLogger().logFallback("generate_preview_snippet", "generation_failed", {
+      spotName,
+      packageTitle,
+      error: error instanceof Error ? error.message : "unknown",
+    });
     return `Discover ${spotName} on the ${packageTitle} route.`;
   }
 }
@@ -662,23 +753,30 @@ async function generatePackageExtras(
   };
 
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return fallback;
+  if (!apiKey) {
+    getGuideMeLogger().logFallback("generate_package_extras", "missing_gemini_api_key", {
+      packageId: summary.id,
+    });
+    return fallback;
+  }
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
   try {
-    const result = await model.generateContent(
-      buildPackageExtrasPrompt(
-        summary.title,
-        summary.region,
-        countryName,
-        summary.days,
-        spotNames,
-        daySpotGroups
-      )
+    const prompt = buildPackageExtrasPrompt(
+      summary.title,
+      summary.region,
+      countryName,
+      summary.days,
+      spotNames,
+      daySpotGroups
     );
-    const parsed = JSON.parse(extractJsonArray(result.response.text())) as typeof fallback;
+    const responseText = await generateGeminiText("generate_package_extras", model, prompt, {
+      packageId: summary.id,
+      spotCount: spots.length,
+    });
+    const parsed = JSON.parse(extractJsonArray(responseText)) as typeof fallback;
     const merged = {
       overview: parsed.overview || fallback.overview,
       daySummaries: parsed.daySummaries ?? fallback.daySummaries,
@@ -690,11 +788,19 @@ async function generatePackageExtras(
     };
 
     if (!validatePackageExtras(merged)) {
-      logEvent("package_extras_validation_failed", { packageId: summary.id });
+      getGuideMeLogger().logValidationFailure(
+        "generate_package_extras",
+        "overview/tips/highlights failed quality gate",
+        { packageId: summary.id }
+      );
       return fallback;
     }
     return merged;
-  } catch {
+  } catch (error) {
+    getGuideMeLogger().error("generate_package_extras_failed", {
+      packageId: summary.id,
+      error: error instanceof Error ? error.message : "unknown",
+    });
     return fallback;
   }
 }
@@ -714,12 +820,19 @@ async function fetchVerifiedHotels(
       let description = place.description;
       if (model) {
         try {
-          const result = await model.generateContent(
-            buildHotelDescriptionPrompt(place.name, region)
-          );
-          description = result.response.text().trim();
-        } catch {
-          // keep vicinity description
+          const prompt = buildHotelDescriptionPrompt(place.name, region);
+          description = (
+            await generateGeminiText("hotel_description", model, prompt, {
+              hotelName: place.name,
+              region,
+            })
+          ).trim();
+        } catch (error) {
+          getGuideMeLogger().warn("hotel_description_failed", {
+            hotelName: place.name,
+            region,
+            error: error instanceof Error ? error.message : "unknown",
+          });
         }
       }
       return {
@@ -748,12 +861,19 @@ async function fetchVerifiedRestaurants(
       let description = place.description;
       if (model) {
         try {
-          const result = await model.generateContent(
-            buildRestaurantDescriptionPrompt(place.name, region)
-          );
-          description = result.response.text().trim();
-        } catch {
-          // keep vicinity description
+          const prompt = buildRestaurantDescriptionPrompt(place.name, region);
+          description = (
+            await generateGeminiText("restaurant_description", model, prompt, {
+              restaurantName: place.name,
+              region,
+            })
+          ).trim();
+        } catch (error) {
+          getGuideMeLogger().warn("restaurant_description_failed", {
+            restaurantName: place.name,
+            region,
+            error: error instanceof Error ? error.message : "unknown",
+          });
         }
       }
       return {

@@ -4,6 +4,9 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
+import com.guideme.travel.domain.analytics.AnalyticsEvents
+import com.guideme.travel.domain.analytics.AnalyticsParams
+import com.guideme.travel.domain.analytics.GuideMeAnalytics
 import com.guideme.travel.domain.model.OfflinePackProgress
 import com.guideme.travel.domain.repository.DownloadWorkRepository
 import com.guideme.travel.domain.usecase.GetOfflinePackSizeUseCase
@@ -16,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -37,11 +41,14 @@ class DownloadPackViewModel @Inject constructor(
     private val observeTripUseCase: ObserveTripUseCase,
     private val observeWifiOnlyDownloadsUseCase: ObserveWifiOnlyDownloadsUseCase,
     private val getOfflinePackSizeUseCase: GetOfflinePackSizeUseCase,
-    private val startTripUseCase: StartTripUseCase
+    private val startTripUseCase: StartTripUseCase,
+    private val analytics: GuideMeAnalytics
 ) : ViewModel() {
 
     private val tripId: String = savedStateHandle.toRoute<DownloadRoute>().tripId
     private val localState = MutableStateFlow(DownloadPackUiState())
+    private var downloadCompleteLogged = false
+    private var downloadFailedLogged = false
 
     val uiState: StateFlow<DownloadPackUiState> = combine(
         localState,
@@ -79,11 +86,45 @@ class DownloadPackViewModel @Inject constructor(
                 it.copy(estimatedSizeMb = trip?.offlinePackSizeMb ?: 0)
             }
         }
+
+        viewModelScope.launch {
+            downloadWorkRepository.observeDownload(tripId)
+                .distinctUntilChanged { old, new ->
+                    old?.isComplete == new?.isComplete && old?.errorMessage == new?.errorMessage
+                }
+                .collect { work ->
+                    if (work?.isComplete == true && !downloadCompleteLogged) {
+                        downloadCompleteLogged = true
+                        analytics.logEvent(
+                            AnalyticsEvents.OFFLINE_DOWNLOAD_COMPLETE,
+                            mapOf(
+                                AnalyticsParams.TRIP_ID to tripId,
+                                AnalyticsParams.COUNT to work.completedSteps
+                            )
+                        )
+                    }
+                    val error = work?.errorMessage
+                    if (!error.isNullOrBlank() && !downloadFailedLogged) {
+                        downloadFailedLogged = true
+                        analytics.logEvent(
+                            AnalyticsEvents.OFFLINE_DOWNLOAD_FAILED,
+                            mapOf(
+                                AnalyticsParams.TRIP_ID to tripId,
+                                AnalyticsParams.ERROR_MESSAGE to error
+                            )
+                        )
+                    }
+                }
+        }
     }
 
     fun download(tripId: String) {
         viewModelScope.launch {
             val wifiOnly = observeWifiOnlyDownloadsUseCase().first()
+            analytics.logEvent(
+                AnalyticsEvents.OFFLINE_DOWNLOAD_STARTED,
+                mapOf(AnalyticsParams.TRIP_ID to tripId, "wifi_only" to wifiOnly)
+            )
             localState.update { it.copy(isDownloading = true, errorMessage = null) }
             downloadWorkRepository.enqueueDownload(tripId, wifiOnly)
         }
@@ -93,6 +134,10 @@ class DownloadPackViewModel @Inject constructor(
         viewModelScope.launch {
             downloadWorkRepository.cancelDownload(tripId)
             localState.update { it.copy(isDownloading = false) }
+            analytics.logEvent(
+                "offline_download_cancelled",
+                mapOf(AnalyticsParams.TRIP_ID to tripId)
+            )
         }
     }
 
@@ -100,6 +145,7 @@ class DownloadPackViewModel @Inject constructor(
 
     fun startTripOnline() {
         viewModelScope.launch {
+            analytics.logEvent(AnalyticsEvents.START_TRIP_ONLINE, mapOf(AnalyticsParams.TRIP_ID to tripId))
             startTripUseCase(tripId)
         }
     }

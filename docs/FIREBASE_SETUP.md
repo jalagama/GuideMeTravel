@@ -179,7 +179,7 @@ firebase deploy --only functions
 
 ### Admin console (hosting)
 
-Static UI at `admin/public/index.html`. Before deploy, replace Firebase web config placeholders with values from **Project settings → Your apps → Web app**.
+Static UI at `backend/admin/public/index.html`. Deploy hosting from the `backend/` directory (see below).
 
 ```bash
 cd backend

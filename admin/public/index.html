@@ -1,66 +1,68 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GuideMe Admin — Country Curation</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
-    h1 { font-size: 1.4rem; }
-    fieldset { margin: 1rem 0; border: 1px solid #ccc; padding: 1rem; }
-    label { display: block; margin: 0.25rem 0; }
-    button { margin: 0.5rem 0.5rem 0.5rem 0; padding: 0.5rem 1rem; cursor: pointer; }
-    pre { background: #f4f4f4; padding: 1rem; overflow: auto; font-size: 0.85rem; }
-    .hidden { display: none; }
-    .badge { display: inline-block; background: #eef; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.85rem; }
-  </style>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>GuideMe Admin — Country Curation</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+        h1 { font-size: 1.4rem; }
+        fieldset { margin: 1rem 0; border: 1px solid #ccc; padding: 1rem; }
+        label { display: block; margin: 0.25rem 0; }
+        button { margin: 0.5rem 0.5rem 0.5rem 0; padding: 0.5rem 1rem; cursor: pointer; }
+        pre { background: #f4f4f4; padding: 1rem; overflow: auto; font-size: 0.85rem; }
+        .hidden { display: none; }
+        .badge { display: inline-block; background: #eef; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.85rem; }
+    </style>
 </head>
 <body>
-  <h1>GuideMe Travel — Admin Curation</h1>
-  <p id="auth-status">Sign in to continue.</p>
-  <button id="sign-in">Sign in with Google</button>
-  <button id="sign-out" class="hidden">Sign out</button>
-  <button id="make-admin" class="hidden">Grant admin claim (bootstrap)</button>
+<h1>GuideMe Travel — Admin Curation</h1>
+<p id="auth-status">Sign in to continue.</p>
+<button id="sign-in">Sign in with Google</button>
+<button id="sign-out" class="hidden">Sign out</button>
+<button id="make-admin" class="hidden">Grant admin claim (bootstrap)</button>
 
-  <div id="console" class="hidden">
+<div id="console" class="hidden">
     <fieldset>
-      <legend>Curate country</legend>
-      <label>Country code
-        <input id="country-code" value="IN" maxlength="2" />
-      </label>
-      <p>Languages (guide pregen):</p>
-      <div id="languages">
-        <label><input type="checkbox" value="en" checked /> English</label>
-        <label><input type="checkbox" value="hi" /> Hindi</label>
-        <label><input type="checkbox" value="ta" /> Tamil</label>
-      </div>
-      <p class="badge">Quality: Pro expert spots + Flash bulk + WaveNet TTS</p>
-      <button id="curate-catalog">1. Curate catalog only</button>
-      <button id="curate-full">Curate catalog + guides</button>
-      <button id="add-languages">2. Add languages only</button>
-      <button id="advance-job">Advance job (25 steps)</button>
+        <legend>Curate country</legend>
+        <label>Country code
+            <input id="country-code" value="IN" maxlength="2"/>
+        </label>
+        <p>Languages (guide pregen):</p>
+        <div id="languages">
+            <label><input type="checkbox" value="en" checked/> English</label>
+            <label><input type="checkbox" value="hi"/> Hindi</label>
+            <label><input type="checkbox" value="ta"/> Tamil</label>
+        </div>
+        <p class="badge">Quality: Pro expert spots + Flash bulk + WaveNet TTS</p>
+        <button id="curate-catalog">1. Curate catalog only</button>
+        <button id="curate-full">Curate catalog + guides</button>
+        <button id="add-languages">2. Add languages only</button>
+        <button id="advance-job">Advance job (25 steps)</button>
     </fieldset>
     <fieldset>
-      <legend>Job status</legend>
-      <label>Job ID <input id="job-id" style="width:100%" /></label>
-      <button id="refresh-status">Refresh status</button>
-      <pre id="job-status">No job yet.</pre>
+        <legend>Job status</legend>
+        <label>Job ID <input id="job-id" style="width:100%"/></label>
+        <button id="refresh-status">Refresh status</button>
+        <pre id="job-status">No job yet.</pre>
     </fieldset>
-  </div>
+</div>
 
-  <script type="module">
+<script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
     import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
     import { getFunctions, httpsCallable, connectFunctionsEmulator } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-functions.js';
 
+
     const firebaseConfig = {
-      apiKey: "REPLACE_WITH_WEB_API_KEY",
-      authDomain: "travelguide-47f80.firebaseapp.com",
-      projectId: "travelguide-47f80",
-      storageBucket: "travelguide-47f80.firebasestorage.app",
-      messagingSenderId: "REPLACE",
-      appId: "REPLACE"
-    };
+    apiKey: "AIzaSyBK08j3vvbkOIfBiN6UNLd2OQlWlow-t0o",
+    authDomain: "travelguide-47f80.firebaseapp.com",
+    projectId: "travelguide-47f80",
+    storageBucket: "travelguide-47f80.firebasestorage.app",
+    messagingSenderId: "568960151390",
+    appId: "1:568960151390:web:6275b474ad5dac8218e9cf",
+    measurementId: "G-JP40RQPBXC"
+};
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
@@ -137,6 +139,6 @@
     }
 
     document.getElementById('refresh-status').onclick = refreshStatus;
-  </script>
+</script>
 </body>
 </html>

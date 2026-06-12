@@ -1,4 +1,4 @@
-import { geminiModelsToTry } from "./geminiConfig";
+import { type GeminiModelTier, geminiModelsToTry } from "./geminiConfig";
 import { extractJsonArray } from "./mapsHelpers";
 import { getGuideMeLogger } from "./logging/loggerContext";
 import { fetchWithTimeout } from "./utils";
@@ -45,6 +45,23 @@ export function isInvalidGeminiApiKeyError(error: unknown): boolean {
     message.includes("API key expired") ||
     message.includes("PERMISSION_DENIED")
   );
+}
+
+/** Billing/quota failures (depleted credits, exhausted quota) fail identically across models. */
+export function isGeminiBillingError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    message.includes("prepayment credits") ||
+    message.includes("credits are depleted") ||
+    message.includes("billing") ||
+    message.includes("resource_exhausted") ||
+    message.includes("quota")
+  );
+}
+
+/** Errors that will recur identically on every model, so retrying other models is pointless. */
+export function isNonRetriableGeminiError(error: unknown): boolean {
+  return isInvalidGeminiApiKeyError(error) || isGeminiBillingError(error);
 }
 
 type GeminiGenerationConfig = {
@@ -113,13 +130,15 @@ async function generateWithFallback(
   operation: string,
   prompt: string,
   context: Record<string, unknown>,
-  generationConfig: GeminiGenerationConfig
+  generationConfig: GeminiGenerationConfig,
+  tier: GeminiModelTier = "lite",
+  primaryModel?: string
 ): Promise<string> {
   const apiKey = requireGeminiApiKey();
   const logger = getGuideMeLogger();
   let lastError: unknown;
 
-  for (const modelName of geminiModelsToTry()) {
+  for (const modelName of geminiModelsToTry(tier, primaryModel)) {
     try {
       logger.logPrompt(operation, prompt, { ...context, modelName });
       const text = await callGeminiRest(modelName, prompt, apiKey, generationConfig);
@@ -133,8 +152,8 @@ async function generateWithFallback(
         error: error instanceof Error ? error.message : String(error),
         ...context,
       });
-      // An invalid key fails identically for every model — stop retrying.
-      if (isInvalidGeminiApiKeyError(error)) {
+      // Invalid-key and billing/quota errors recur identically for every model — stop retrying.
+      if (isNonRetriableGeminiError(error)) {
         break;
       }
     }
@@ -146,22 +165,44 @@ async function generateWithFallback(
   throw new Error("All Gemini model attempts failed");
 }
 
+export type GeminiCallOptions = {
+  tier?: GeminiModelTier;
+  /** When set, tries this model first before tier fallbacks. */
+  model?: string;
+};
+
 export async function generateGeminiJson<T>(
   operation: string,
   prompt: string,
-  context: Record<string, unknown> = {}
+  context: Record<string, unknown> = {},
+  options: GeminiCallOptions = {}
 ): Promise<T> {
-  const text = await generateWithFallback(operation, prompt, context, {
-    responseMimeType: "application/json",
-    temperature: 0.2,
-  });
+  const text = await generateWithFallback(
+    operation,
+    prompt,
+    context,
+    {
+      responseMimeType: "application/json",
+      temperature: 0.2,
+    },
+    options.tier ?? "lite",
+    options.model
+  );
   return JSON.parse(extractJsonArray(text)) as T;
 }
 
 export async function generateGeminiPlainText(
   operation: string,
   prompt: string,
-  context: Record<string, unknown> = {}
+  context: Record<string, unknown> = {},
+  options: GeminiCallOptions = {}
 ): Promise<string> {
-  return generateWithFallback(operation, prompt, context, { temperature: 0.4 });
+  return generateWithFallback(
+    operation,
+    prompt,
+    context,
+    { temperature: 0.4 },
+    options.tier ?? "lite",
+    options.model
+  );
 }

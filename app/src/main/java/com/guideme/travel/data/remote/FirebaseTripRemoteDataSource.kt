@@ -77,11 +77,18 @@ class FirebaseTripRemoteDataSource @Inject constructor(
 
         val result = try {
             functions
-                .getHttpsCallable("generateGuidePack")
+                .getHttpsCallable("getGuidePackForTripCallable")
                 .call(mapOf("tripId" to tripId))
                 .await()
-        } catch (error: Exception) {
-            throw mapRemoteError(error, uid)
+        } catch (readOnlyError: Exception) {
+            try {
+                functions
+                    .getHttpsCallable("generateGuidePack")
+                    .call(mapOf("tripId" to tripId))
+                    .await()
+            } catch (error: Exception) {
+                throw mapRemoteError(error, uid)
+            }
         }
 
         @Suppress("UNCHECKED_CAST")

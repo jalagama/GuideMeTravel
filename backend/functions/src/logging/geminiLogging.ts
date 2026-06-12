@@ -1,4 +1,4 @@
-import { generateGeminiPlainText } from "../geminiClient";
+import { generateGeminiPlainText, type GeminiCallOptions } from "../geminiClient";
 
 /**
  * Generate plain text from Gemini. Routes through the REST client so both
@@ -7,7 +7,8 @@ import { generateGeminiPlainText } from "../geminiClient";
 export async function generateGeminiText(
   operation: string,
   prompt: string,
-  context: Record<string, unknown> = {}
+  context: Record<string, unknown> = {},
+  options: GeminiCallOptions = {}
 ): Promise<string> {
-  return generateGeminiPlainText(operation, prompt, context);
+  return generateGeminiPlainText(operation, prompt, context, options);
 }

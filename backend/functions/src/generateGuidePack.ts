@@ -42,6 +42,47 @@ type AudioFileResult = {
   transcript: string;
 };
 
+export async function getGuidePackForTrip(input: GenerateGuidePackInput) {
+  const tripSnap = await db.collection("trips").doc(input.tripId).get();
+  if (!tripSnap.exists) {
+    throw new HttpsError("not-found", "Trip not found");
+  }
+
+  const trip = tripSnap.data()!;
+  if (trip.userId !== input.userId) {
+    throw new HttpsError("permission-denied", "Unauthorized trip access");
+  }
+
+  const attractions = (trip.attractions ?? []) as Attraction[];
+  const languageCode = validateLanguageCode(String(trip.languageCode ?? "en"));
+
+  const audioFiles = await Promise.all(
+    attractions.map(async (attraction) => {
+      const cached = await db
+        .collection("attractions")
+        .doc(attraction.id)
+        .collection("guideContent")
+        .doc(languageCode)
+        .get();
+
+      if (!cached.exists || !cached.data()?.audioAvailable) {
+        throw new HttpsError(
+          "failed-precondition",
+          `Guide not curated for ${languageCode} — spot ${attraction.name}. Ask admin to add this language.`
+        );
+      }
+
+      return resolveCachedGuide(attraction.id, cached.data()!);
+    })
+  );
+
+  return {
+    tripId: input.tripId,
+    languageCode,
+    audioFiles,
+  };
+}
+
 export async function generateGuidePackForTrip(input: GenerateGuidePackInput) {
   const tripSnap = await db.collection("trips").doc(input.tripId).get();
   if (!tripSnap.exists) {

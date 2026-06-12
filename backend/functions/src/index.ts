@@ -1,14 +1,18 @@
 import "./firebaseAdmin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
-import { generateItineraryForDestination } from "./generateItinerary";
-import { generateGuidePackForTrip } from "./generateGuidePack";
+import { createTripFromSearch } from "./resolveSearchTrip";
+import { generateGuidePackForTrip, getGuidePackForTrip } from "./generateGuidePack";
 import {
   createTripFromPackage as createTripFromPackageService,
   getCountryGenres as getCountryGenresService,
   getGenrePackages as getGenrePackagesService,
   getTourPackageDetail as getTourPackageDetailService,
 } from "./curatedContent";
+import { advanceCurationJob, getCurationJob, listCurationJobs, startCountryCuration } from "./bulkCurateCountry";
+import { requireAdmin } from "./admin/requireAdmin";
+import { setAdminClaimForUid } from "./admin/setAdminClaim";
+import type { CurationMode } from "./curationTypes";
 import { enforceRateLimit } from "./rateLimit";
 import { logEvent, toHttpsError, validateLanguageCode } from "./utils";
 
@@ -69,7 +73,7 @@ export const generateItinerary = onCall(
     });
 
     try {
-      return await generateItineraryForDestination({
+      return await createTripFromSearch({
         userId: request.auth.uid,
         origin,
         destination,
@@ -266,5 +270,151 @@ export const createTripFromPackage = onCall(
     } catch (error) {
       throw toHttpsError(error);
     }
+  }
+);
+
+export const getGuidePackForTripCallable = onCall(
+  {
+    region: "asia-south1",
+    timeoutSeconds: 120,
+    secrets: [geminiApiKey],
+    enforceAppCheck: false,
+    invoker: "public",
+  },
+  async (request) => {
+    bindGeminiSecret();
+
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const tripId = String(request.data.tripId ?? "").trim();
+    if (!tripId) {
+      throw new HttpsError("invalid-argument", "tripId is required.");
+    }
+
+    try {
+      return await getGuidePackForTrip({
+        userId: request.auth.uid,
+        tripId,
+      });
+    } catch (error) {
+      throw toHttpsError(error);
+    }
+  }
+);
+
+export const adminStartCountryCuration = onCall(
+  {
+    region: "asia-south1",
+    timeoutSeconds: 120,
+    secrets: [geminiApiKey, googleMapsApiKey],
+    enforceAppCheck: false,
+    invoker: "public",
+  },
+  async (request) => {
+    bindCallableSecrets();
+    const uid = requireAdmin(request);
+
+    const countryCode = String(request.data.countryCode ?? "").trim();
+    const mode = String(request.data.mode ?? "full") as CurationMode;
+    const languagesRaw = request.data.languages;
+    const languages = Array.isArray(languagesRaw)
+      ? languagesRaw.map((lang) => String(lang))
+      : ["en"];
+
+    if (!countryCode) {
+      throw new HttpsError("invalid-argument", "countryCode is required.");
+    }
+    if (!["full", "catalog_only", "languages_only"].includes(mode)) {
+      throw new HttpsError("invalid-argument", "Invalid curation mode.");
+    }
+
+    return startCountryCuration({ countryCode, languages, mode, startedBy: uid });
+  }
+);
+
+export const adminAdvanceCurationJob = onCall(
+  {
+    region: "asia-south1",
+    timeoutSeconds: 540,
+    secrets: [geminiApiKey, googleMapsApiKey],
+    enforceAppCheck: false,
+    invoker: "public",
+  },
+  async (request) => {
+    bindCallableSecrets();
+    requireAdmin(request);
+
+    const jobId = String(request.data.jobId ?? "").trim();
+    if (!jobId) {
+      throw new HttpsError("invalid-argument", "jobId is required.");
+    }
+
+    let hasMore = true;
+    let steps = 0;
+    while (hasMore && steps < 25) {
+      hasMore = await advanceCurationJob(jobId);
+      steps += 1;
+    }
+
+    return { jobId, stepsProcessed: steps, hasMore };
+  }
+);
+
+export const adminGetCurationStatus = onCall(
+  {
+    region: "asia-south1",
+    timeoutSeconds: 30,
+    enforceAppCheck: false,
+    invoker: "public",
+  },
+  async (request) => {
+    requireAdmin(request);
+    const jobId = String(request.data.jobId ?? "").trim();
+    if (!jobId) {
+      throw new HttpsError("invalid-argument", "jobId is required.");
+    }
+    const job = await getCurationJob(jobId);
+    if (!job) {
+      throw new HttpsError("not-found", `Job ${jobId} not found.`);
+    }
+    return job;
+  }
+);
+
+export const adminListCurationJobs = onCall(
+  {
+    region: "asia-south1",
+    timeoutSeconds: 30,
+    enforceAppCheck: false,
+    invoker: "public",
+  },
+  async (request) => {
+    requireAdmin(request);
+    const countryCode = String(request.data.countryCode ?? "").trim();
+    const limit = Number(request.data.limit ?? 10);
+    if (!countryCode) {
+      throw new HttpsError("invalid-argument", "countryCode is required.");
+    }
+    const jobs = await listCurationJobs(countryCode, limit);
+    return { jobs };
+  }
+);
+
+export const adminSetAdminClaim = onCall(
+  {
+    region: "asia-south1",
+    timeoutSeconds: 30,
+    enforceAppCheck: false,
+    invoker: "public",
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+    const targetUid = String(request.data.uid ?? request.auth.uid).trim();
+    await setAdminClaimForUid(targetUid, request.auth.uid);
+    return { uid: targetUid, admin: true };
   }
 );

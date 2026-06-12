@@ -7,6 +7,14 @@
         { "fieldPath": "userId", "order": "ASCENDING" },
         { "fieldPath": "createdAtMillis", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "curationJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "countryCode", "order": "ASCENDING" },
+        { "fieldPath": "startedAtMillis", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

@@ -17,7 +17,19 @@ import {
 } from "./mapsHelpers";
 import { buildSpotsPrompt } from "./prompts/curatedPrompts";
 import { getGuideMeLogger } from "./logging/loggerContext";
-import { generateGeminiJson, hasGeminiApiKey, isInvalidGeminiApiKeyError } from "./geminiClient";
+import {
+  readDestinationCurationCache,
+  writeDestinationCurationCache,
+} from "./destinationCurationCache";
+import { expertSpotTarget, resolveCurationOptions } from "./geminiConfig";
+import type { CurationContext } from "./curationTypes";
+import {
+  generateGeminiJson,
+  hasGeminiApiKey,
+  isGeminiBillingError,
+  isInvalidGeminiApiKeyError,
+  isNonRetriableGeminiError,
+} from "./geminiClient";
 
 type GeminiSpot = AttractionDoc & { rank?: number; significance?: string };
 
@@ -27,11 +39,13 @@ export async function curateDestinationAttractions(input: {
   countryCode: string;
   targetCount: number;
   operationPrefix: string;
+  context?: CurationContext;
 }): Promise<AttractionDoc[]> {
+  const ctx = input.context ?? { quality: "user" as const };
   const countryName = countryNameFromCode(input.countryCode);
   const region = await resolveRegion(input.destination, input.region, input.countryCode, countryName);
   const destinationQuery = `${input.destination}, ${region}, ${countryName}`;
-  const expertTarget = Math.max(input.targetCount * 2, 20);
+  const expertTarget = expertSpotTarget(input.targetCount, ctx);
   const minCount = Math.min(3, input.targetCount);
 
   const [geminiSpots, placesResult] = await Promise.all([
@@ -41,7 +55,8 @@ export async function curateDestinationAttractions(input: {
       countryName,
       input.countryCode,
       expertTarget,
-      input.operationPrefix
+      input.operationPrefix,
+      ctx
     ),
     fetchCuratedPlacesAttractionsInCountry(destinationQuery, input.countryCode, expertTarget).catch(
       () => ({ attractions: [] as AttractionDoc[], placeTypesById: new Map<string, string[]>() })
@@ -155,7 +170,8 @@ async function fetchExpertGeminiSpots(
   countryName: string,
   countryCode: string,
   maxResults: number,
-  operationPrefix: string
+  operationPrefix: string,
+  context: CurationContext
 ): Promise<GeminiSpot[]> {
   if (!hasGeminiApiKey()) {
     getGuideMeLogger().error("expert_spots_missing_api_key", {
@@ -166,19 +182,28 @@ async function fetchExpertGeminiSpots(
     return [];
   }
 
+  const cached = await readDestinationCurationCache(destination, region, countryCode);
+  if (cached) {
+    return normalizeGeminiSpots(cached, maxResults);
+  }
+
   const prompt = buildSpotsPrompt(destination, region, countryName, countryCode, maxResults);
   const maxAttempts = 2;
   let lastError: unknown;
+
+  const spotOptions = resolveCurationOptions(context.quality, "expert_spots");
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const parsed = await generateGeminiJson<GeminiSpot[]>(
         `${operationPrefix}_expert_spots`,
         prompt,
-        { destination, region, countryCode, maxResults, attempt }
+        { destination, region, countryCode, maxResults, attempt },
+        { tier: spotOptions.tier, model: spotOptions.model }
       );
       const spots = normalizeGeminiSpots(parsed, maxResults);
       if (spots.length > 0) {
+        await writeDestinationCurationCache(destination, region, countryCode, spots);
         return spots;
       }
       getGuideMeLogger().warn("expert_spots_empty_response", {
@@ -194,25 +219,54 @@ async function fetchExpertGeminiSpots(
         attempt,
         error: error instanceof Error ? error.message : "unknown",
       });
+      // Billing/quota and invalid-key errors won't recover on retry.
+      if (isNonRetriableGeminiError(error)) {
+        break;
+      }
     }
   }
 
   if (lastError) {
     const errorMessage = lastError instanceof Error ? lastError.message : String(lastError);
-    getGuideMeLogger().error(
-      isInvalidGeminiApiKeyError(lastError) ? "expert_spots_invalid_api_key" : "expert_spots_exhausted",
-      {
+
+    if (isGeminiBillingError(lastError)) {
+      getGuideMeLogger().error("expert_spots_billing_exhausted", {
         destination,
         countryCode,
         error: errorMessage,
-      }
-    );
+      });
+      throw new HttpsError(
+        "resource-exhausted",
+        "AI curation is temporarily unavailable (Gemini API credits exhausted). Contact support."
+      );
+    }
+
+    if (isInvalidGeminiApiKeyError(lastError)) {
+      getGuideMeLogger().error("expert_spots_invalid_api_key", {
+        destination,
+        countryCode,
+        error: errorMessage,
+      });
+      throw new HttpsError(
+        "failed-precondition",
+        "AI curation is misconfigured on the server (invalid Gemini API key). Contact support."
+      );
+    }
+
+    getGuideMeLogger().error("expert_spots_exhausted", {
+      destination,
+      countryCode,
+      error: errorMessage,
+    });
   }
 
   return [];
 }
 
-function normalizeGeminiSpots(items: GeminiSpot[] | null | undefined, maxResults: number): GeminiSpot[] {
+function normalizeGeminiSpots(
+  items: Array<Partial<GeminiSpot> & { name: string }> | null | undefined,
+  maxResults: number
+): GeminiSpot[] {
   if (!Array.isArray(items)) {
     return [];
   }
@@ -222,11 +276,16 @@ function normalizeGeminiSpots(items: GeminiSpot[] | null | undefined, maxResults
     .slice(0, maxResults)
     .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999))
     .map((item, index) => ({
-      ...item,
       id: item.id || slugify(item.name),
+      name: item.name,
+      description: item.significance || item.description || item.name,
+      latitude: item.latitude ?? 0,
+      longitude: item.longitude ?? 0,
+      imageUrl: item.imageUrl,
       orderIndex: index,
       estimatedMinutes: item.estimatedMinutes ?? 60,
-      description: item.significance || item.description || item.name,
+      rank: item.rank,
+      significance: item.significance,
     }));
 }
 

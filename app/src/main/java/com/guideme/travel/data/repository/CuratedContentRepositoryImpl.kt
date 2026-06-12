@@ -6,6 +6,7 @@ import com.guideme.travel.data.local.CuratedContentLocalDataSource
 import com.guideme.travel.data.local.TripDao
 import com.guideme.travel.data.local.toEntity
 import com.guideme.travel.data.remote.FirebaseCuratedContentDataSource
+import com.guideme.travel.data.remote.FirestoreCuratedContentDataSource
 import com.guideme.travel.domain.logging.GuideMeLogger
 import com.guideme.travel.domain.logging.LogTags
 import com.guideme.travel.domain.model.CountryGenres
@@ -14,26 +15,21 @@ import com.guideme.travel.domain.model.TourPackageDetail
 import com.guideme.travel.domain.model.TripPlan
 import com.guideme.travel.domain.model.TripStatus
 import com.guideme.travel.domain.repository.CuratedContentRepository
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class CuratedContentRepositoryImpl @Inject constructor(
+    private val firestoreDataSource: FirestoreCuratedContentDataSource,
     private val remoteDataSource: FirebaseCuratedContentDataSource,
     private val localDataSource: CuratedContentLocalDataSource,
     private val tripDao: TripDao,
     private val attractionDao: AttractionDao,
     private val logger: GuideMeLogger
 ) : CuratedContentRepository {
-
-    private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun observeCountryGenres(countryCode: String): Flow<CountryGenres?> {
         return localDataSource.observeCountryGenres(countryCode)
@@ -84,7 +80,12 @@ class CuratedContentRepositoryImpl @Inject constructor(
 
     override suspend fun refreshCountryGenres(countryCode: String): CountryGenres {
         logger.info(LogTags.CURATED_REPO, "refresh_country_genres", mapOf("countryCode" to countryCode))
-        val remote = remoteDataSource.getCountryGenres(countryCode)
+        val remote = runCatching {
+            firestoreDataSource.getCountryGenres(countryCode)
+        }.getOrElse {
+            logger.warn(LogTags.CURATED_REPO, "firestore_genres_fallback", mapOf("countryCode" to countryCode), it)
+            remoteDataSource.getCountryGenres(countryCode)
+        }
         localDataSource.upsertCountryGenres(remote)
         logger.info(
             LogTags.CURATED_REPO,
@@ -100,7 +101,12 @@ class CuratedContentRepositoryImpl @Inject constructor(
             "refresh_genre_packages",
             mapOf("countryCode" to countryCode, "genreId" to genreId)
         )
-        val remote = remoteDataSource.getGenrePackages(countryCode, genreId)
+        val remote = runCatching {
+            firestoreDataSource.getGenrePackages(countryCode, genreId)
+        }.getOrElse {
+            logger.warn(LogTags.CURATED_REPO, "firestore_packages_fallback", mapOf("countryCode" to countryCode, "genreId" to genreId), it)
+            remoteDataSource.getGenrePackages(countryCode, genreId)
+        }
         localDataSource.upsertGenrePackages(remote)
         logger.info(
             LogTags.CURATED_REPO,
@@ -120,7 +126,12 @@ class CuratedContentRepositoryImpl @Inject constructor(
             "refresh_package_detail",
             mapOf("packageId" to packageId, "countryCode" to countryCode, "genreId" to genreId)
         )
-        val remote = remoteDataSource.getTourPackageDetail(packageId, countryCode, genreId)
+        val remote = runCatching {
+            firestoreDataSource.getTourPackageDetail(packageId)
+        }.getOrElse {
+            logger.warn(LogTags.CURATED_REPO, "firestore_package_detail_fallback", mapOf("packageId" to packageId), it)
+            remoteDataSource.getTourPackageDetail(packageId, countryCode, genreId)
+        }
         localDataSource.upsertTourPackageDetail(remote)
         logger.info(
             LogTags.CURATED_REPO,
@@ -203,27 +214,6 @@ class CuratedContentRepositoryImpl @Inject constructor(
             "create_trip_local_complete",
             mapOf("tripId" to tripId, "attractionCount" to attractions.size)
         )
-
-        syncScope.launch {
-            runCatching {
-                remoteDataSource.createTripFromPackage(
-                    packageId,
-                    countryCode,
-                    genreId,
-                    origin,
-                    languageCode
-                )
-            }.onSuccess {
-                logger.info(LogTags.CURATED_REPO, "create_trip_background_sync_success", mapOf("packageId" to packageId))
-            }.onFailure { error ->
-                logger.warn(
-                    LogTags.CURATED_REPO,
-                    "create_trip_background_sync_failed",
-                    mapOf("packageId" to packageId),
-                    error
-                )
-            }
-        }
         return trip
     }
 

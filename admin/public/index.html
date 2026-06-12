@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GuideMe Admin — Country Curation</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.4rem; }
+    fieldset { margin: 1rem 0; border: 1px solid #ccc; padding: 1rem; }
+    label { display: block; margin: 0.25rem 0; }
+    button { margin: 0.5rem 0.5rem 0.5rem 0; padding: 0.5rem 1rem; cursor: pointer; }
+    pre { background: #f4f4f4; padding: 1rem; overflow: auto; font-size: 0.85rem; }
+    .hidden { display: none; }
+    .badge { display: inline-block; background: #eef; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1>GuideMe Travel — Admin Curation</h1>
+  <p id="auth-status">Sign in to continue.</p>
+  <button id="sign-in">Sign in with Google</button>
+  <button id="sign-out" class="hidden">Sign out</button>
+  <button id="make-admin" class="hidden">Grant admin claim (bootstrap)</button>
+
+  <div id="console" class="hidden">
+    <fieldset>
+      <legend>Curate country</legend>
+      <label>Country code
+        <input id="country-code" value="IN" maxlength="2" />
+      </label>
+      <p>Languages (guide pregen):</p>
+      <div id="languages">
+        <label><input type="checkbox" value="en" checked /> English</label>
+        <label><input type="checkbox" value="hi" /> Hindi</label>
+        <label><input type="checkbox" value="ta" /> Tamil</label>
+      </div>
+      <p class="badge">Quality: Pro expert spots + Flash bulk + WaveNet TTS</p>
+      <button id="curate-catalog">1. Curate catalog only</button>
+      <button id="curate-full">Curate catalog + guides</button>
+      <button id="add-languages">2. Add languages only</button>
+      <button id="advance-job">Advance job (25 steps)</button>
+    </fieldset>
+    <fieldset>
+      <legend>Job status</legend>
+      <label>Job ID <input id="job-id" style="width:100%" /></label>
+      <button id="refresh-status">Refresh status</button>
+      <pre id="job-status">No job yet.</pre>
+    </fieldset>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
+    import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
+    import { getFunctions, httpsCallable, connectFunctionsEmulator } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-functions.js';
+
+    const firebaseConfig = {
+      apiKey: "REPLACE_WITH_WEB_API_KEY",
+      authDomain: "travelguide-47f80.firebaseapp.com",
+      projectId: "travelguide-47f80",
+      storageBucket: "travelguide-47f80.firebasestorage.app",
+      messagingSenderId: "REPLACE",
+      appId: "REPLACE"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const functions = getFunctions(app, 'asia-south1');
+
+    const authStatus = document.getElementById('auth-status');
+    const consoleEl = document.getElementById('console');
+    const jobStatus = document.getElementById('job-status');
+    const jobIdInput = document.getElementById('job-id');
+
+    function selectedLanguages() {
+      return [...document.querySelectorAll('#languages input:checked')].map(el => el.value);
+    }
+
+    async function callAdmin(name, data) {
+      const fn = httpsCallable(functions, name);
+      const result = await fn(data);
+      return result.data;
+    }
+
+    onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        authStatus.textContent = `Signed in: ${user.email}`;
+        document.getElementById('sign-in').classList.add('hidden');
+        document.getElementById('sign-out').classList.remove('hidden');
+        document.getElementById('make-admin').classList.remove('hidden');
+        consoleEl.classList.remove('hidden');
+        const token = await user.getIdTokenResult(true);
+        if (token.claims.admin) {
+          authStatus.textContent += ' (admin)';
+        }
+      } else {
+        authStatus.textContent = 'Sign in to continue.';
+        document.getElementById('sign-in').classList.remove('hidden');
+        document.getElementById('sign-out').classList.add('hidden');
+        document.getElementById('make-admin').classList.add('hidden');
+        consoleEl.classList.add('hidden');
+      }
+    });
+
+    document.getElementById('sign-in').onclick = () => signInWithPopup(auth, new GoogleAuthProvider());
+    document.getElementById('sign-out').onclick = () => signOut(auth);
+    document.getElementById('make-admin').onclick = async () => {
+      const data = await callAdmin('adminSetAdminClaim', {});
+      alert('Admin claim set. Sign out and sign in again.');
+      jobStatus.textContent = JSON.stringify(data, null, 2);
+    };
+
+    async function startJob(mode) {
+      const countryCode = document.getElementById('country-code').value.trim();
+      const languages = selectedLanguages();
+      const data = await callAdmin('adminStartCountryCuration', { countryCode, languages, mode });
+      jobIdInput.value = data.jobId;
+      jobStatus.textContent = JSON.stringify(data, null, 2);
+    }
+
+    document.getElementById('curate-catalog').onclick = () => startJob('catalog_only');
+    document.getElementById('curate-full').onclick = () => startJob('full');
+    document.getElementById('add-languages').onclick = () => startJob('languages_only');
+
+    document.getElementById('advance-job').onclick = async () => {
+      const jobId = jobIdInput.value.trim();
+      if (!jobId) return alert('Enter job ID');
+      const data = await callAdmin('adminAdvanceCurationJob', { jobId });
+      jobStatus.textContent = JSON.stringify(data, null, 2);
+      await refreshStatus();
+    };
+
+    async function refreshStatus() {
+      const jobId = jobIdInput.value.trim();
+      if (!jobId) return;
+      const data = await callAdmin('adminGetCurationStatus', { jobId });
+      jobStatus.textContent = JSON.stringify(data, null, 2);
+    }
+
+    document.getElementById('refresh-status').onclick = refreshStatus;
+  </script>
+</body>
+</html>

@@ -11,5 +11,13 @@
   },
   "storage": {
     "rules": "storage.rules"
+  },
+  "hosting": {
+    "public": "admin/public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
   }
 }

@@ -20,6 +20,36 @@ service cloud.firestore {
       }
     }
 
+    match /curatedGenres/{countryCode} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /curatedPackages/{docId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /tourPackages/{packageId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /destinationCurations/{docId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /destinationIndex/{countryCode}/entries/{slug} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /curationJobs/{jobId} {
+      allow read: if request.auth != null && request.auth.token.admin == true;
+      allow write: if false;
+    }
+
     match /rateLimits/{limitId} {
       allow read, write: if false;
     }

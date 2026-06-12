@@ -31,6 +31,8 @@ import {
 import { generateGeminiText } from "./logging/geminiLogging";
 import { getGuideMeLogger } from "./logging/loggerContext";
 import { hasGeminiApiKey } from "./geminiClient";
+import { isCostSaverMode, resolveCurationOptions } from "./geminiConfig";
+import type { CurationContext } from "./curationTypes";
 
 type GenreDoc = {
   id: string;
@@ -84,7 +86,7 @@ type TourPackageDetailDoc = {
 const TARGET_PACKAGE_COUNT = 30;
 const MIN_PACKAGE_COUNT = 25;
 
-export async function getCountryGenres(countryCode: string) {
+export async function getCountryGenres(countryCode: string, context?: CurationContext) {
   const normalized = countryCode.trim().toUpperCase();
   const cacheRef = db.collection("curatedGenres").doc(normalized);
   const cached = await cacheRef.get();
@@ -97,7 +99,7 @@ export async function getCountryGenres(countryCode: string) {
 
   getGuideMeLogger().logCacheMiss("curatedGenres", normalized);
   const countryName = countryNameFromCode(normalized);
-  const genres = await generateGenresWithGemini(countryName, normalized);
+  const genres = await generateGenresWithGemini(countryName, normalized, context);
   const doc = {
     countryCode: normalized,
     countryName,
@@ -113,7 +115,11 @@ export async function getCountryGenres(countryCode: string) {
   return doc;
 }
 
-export async function getGenrePackages(countryCode: string, genreId: string) {
+export async function getGenrePackages(
+  countryCode: string,
+  genreId: string,
+  context?: CurationContext
+) {
   const normalized = countryCode.trim().toUpperCase();
   const cacheId = `${normalized}_${genreId}`;
   const cacheRef = db.collection("curatedPackages").doc(cacheId);
@@ -126,7 +132,7 @@ export async function getGenrePackages(countryCode: string, genreId: string) {
   }
 
   getGuideMeLogger().logCacheMiss("curatedPackages", cacheId);
-  const genresDoc = await getCountryGenres(normalized);
+  const genresDoc = await getCountryGenres(normalized, context);
   const genre = (genresDoc?.genres as GenreDoc[] | undefined)?.find((g) => g.id === genreId);
   if (!genre) {
     throw new HttpsError("not-found", `Genre ${genreId} not found for ${normalized}`);
@@ -135,7 +141,8 @@ export async function getGenrePackages(countryCode: string, genreId: string) {
   const packages = await generatePackagesWithGemini(
     countryNameFromCode(normalized),
     normalized,
-    genre
+    genre,
+    context
   );
   const doc = {
     countryCode: normalized,
@@ -189,7 +196,8 @@ export async function getTourPackageDetail(
 export async function ensureTourPackageDetail(
   countryCode: string,
   genreId: string,
-  packageSummary: PackageSummaryDoc
+  packageSummary: PackageSummaryDoc,
+  context?: CurationContext
 ): Promise<TourPackageDetailDoc> {
   const cacheRef = db.collection("tourPackages").doc(packageSummary.id);
   const cached = await cacheRef.get();
@@ -201,7 +209,7 @@ export async function ensureTourPackageDetail(
   }
 
   getGuideMeLogger().logCacheMiss("tourPackages", packageSummary.id, { countryCode, genreId });
-  const detail = await generateTourPackageDetail(countryCode, genreId, packageSummary);
+  const detail = await generateTourPackageDetail(countryCode, genreId, packageSummary, context);
   await cacheRef.set(detail);
   getGuideMeLogger().info("tour_package_detail_generated", {
     packageId: packageSummary.id,
@@ -283,7 +291,11 @@ export async function createTripFromPackage(input: {
   return { tripId: tripRef.id, ...tripDoc };
 }
 
-async function generateGenresWithGemini(countryName: string, countryCode: string): Promise<GenreDoc[]> {
+async function generateGenresWithGemini(
+  countryName: string,
+  countryCode: string,
+  context?: CurationContext
+): Promise<GenreDoc[]> {
   if (!hasGeminiApiKey()) {
     getGuideMeLogger().logFallback("generate_genres", "missing_gemini_api_key", { countryCode });
     return fallbackGenres(countryCode);
@@ -291,10 +303,11 @@ async function generateGenresWithGemini(countryName: string, countryCode: string
 
   try {
     const prompt = buildGenresPrompt(countryName, countryCode);
+    const adminOpts = resolveCurationOptions(context?.quality ?? "user");
     const responseText = await generateGeminiText("generate_genres", prompt, {
       countryCode,
       countryName,
-    });
+    }, { tier: adminOpts.tier, model: adminOpts.model });
     const parsed = JSON.parse(extractJsonArray(responseText)) as {
       genres: Array<GenreDoc & { imageSearchHint?: string; rank?: number }>;
     };
@@ -328,7 +341,8 @@ async function generateGenresWithGemini(countryName: string, countryCode: string
 async function generatePackagesWithGemini(
   countryName: string,
   countryCode: string,
-  genre: GenreDoc
+  genre: GenreDoc,
+  context?: CurationContext
 ): Promise<PackageSummaryDoc[]> {
   if (!hasGeminiApiKey()) {
     getGuideMeLogger().logFallback("generate_packages", "missing_gemini_api_key", {
@@ -339,7 +353,7 @@ async function generatePackagesWithGemini(
   }
 
   try {
-    let rawPackages = await fetchPackagesFromGemini(countryName, countryCode, genre);
+    let rawPackages = await fetchPackagesFromGemini(countryName, countryCode, genre, context);
     rawPackages = dedupeByTitle(rawPackages);
     rawPackages = await verifyPackagesInCountry(rawPackages, countryCode, countryName);
 
@@ -349,7 +363,8 @@ async function generatePackagesWithGemini(
         countryCode,
         genre,
         rawPackages.map((p) => p.title),
-        TARGET_PACKAGE_COUNT - rawPackages.length
+        TARGET_PACKAGE_COUNT - rawPackages.length,
+        context
       );
       const merged = dedupeByTitle([...rawPackages, ...fill]);
       rawPackages = await verifyPackagesInCountry(merged, countryCode, countryName);
@@ -403,13 +418,17 @@ async function generatePackagesWithGemini(
 async function fetchPackagesFromGemini(
   countryName: string,
   countryCode: string,
-  genre: GenreDoc
+  genre: GenreDoc,
+  context?: CurationContext
 ): Promise<PackageSummaryDoc[]> {
   const prompt = buildPackagesPrompt(countryName, countryCode, genre.name, genre.type);
-  const responseText = await generateGeminiText("fetch_packages", prompt, {
-    countryCode,
-    genreId: genre.id,
-  });
+  const adminOpts = resolveCurationOptions(context?.quality ?? "user");
+  const responseText = await generateGeminiText(
+    "fetch_packages",
+    prompt,
+    { countryCode, genreId: genre.id },
+    { tier: adminOpts.tier, model: adminOpts.model }
+  );
   const parsed = JSON.parse(extractJsonArray(responseText)) as {
     packages: PackageSummaryDoc[];
   };
@@ -426,7 +445,8 @@ async function fetchPackagesFillFromGemini(
   countryCode: string,
   genre: GenreDoc,
   existingTitles: string[],
-  needed: number
+  needed: number,
+  context?: CurationContext
 ): Promise<PackageSummaryDoc[]> {
   if (needed <= 0) return [];
   const prompt = buildPackagesFillPrompt(
@@ -436,11 +456,13 @@ async function fetchPackagesFillFromGemini(
     existingTitles,
     needed
   );
-  const responseText = await generateGeminiText("fetch_packages_fill", prompt, {
-    countryCode,
-    genreId: genre.id,
-    needed,
-  });
+  const adminOpts = resolveCurationOptions(context?.quality ?? "user");
+  const responseText = await generateGeminiText(
+    "fetch_packages_fill",
+    prompt,
+    { countryCode, genreId: genre.id, needed },
+    { tier: adminOpts.tier, model: adminOpts.model }
+  );
   const parsed = JSON.parse(extractJsonArray(responseText)) as {
     packages: PackageSummaryDoc[];
   };
@@ -527,11 +549,13 @@ async function buildFallbackPackages(
 async function generateTourPackageDetail(
   countryCode: string,
   genreId: string,
-  summary: PackageSummaryDoc
+  summary: PackageSummaryDoc,
+  context?: CurationContext
 ): Promise<TourPackageDetailDoc> {
   const countryName = countryNameFromCode(countryCode);
   const days = summary.days;
   const targetCount = targetSpotCount(days);
+  const adminContext = context ?? { quality: "user" as const };
 
   let curated = await curateDestinationAttractions({
     destination: summary.title,
@@ -539,6 +563,7 @@ async function generateTourPackageDetail(
     countryCode,
     targetCount,
     operationPrefix: "package",
+    context: adminContext,
   });
 
   if (curated.length < 3) {
@@ -550,17 +575,24 @@ async function generateTourPackageDetail(
 
   curated = assignDays(curated, days);
 
+  const costSaver = isCostSaverMode(adminContext);
+
   curated = await Promise.all(
     curated.map(async (spot, index) => {
       const wiki = await fetchWikipediaSummary(spot.name, "en");
       const description = wiki || spot.description;
-      const whyChosen = await generateWhyChosen(spot, summary.title);
-      const transcript = await generateTourGuideTranscript(
-        spot.name,
-        description,
-        summary.title,
-        summary.region
-      );
+      const whyChosen = costSaver
+        ? buildTemplateWhyChosen(spot, summary.title)
+        : await generateWhyChosen(spot, summary.title, adminContext);
+      const transcript = costSaver
+        ? buildTemplateTranscript(spot.name, description, summary.title, summary.region)
+        : await generateTourGuideTranscript(
+            spot.name,
+            description,
+            summary.title,
+            summary.region,
+            adminContext
+          );
       const previewSnippet = excerptTranscript(transcript, 75);
       return {
         ...spot,
@@ -573,13 +605,13 @@ async function generateTourPackageDetail(
     })
   );
 
-  const extras = await generatePackageExtras(summary, countryName, curated);
+  const extras = await generatePackageExtras(summary, countryName, curated, adminContext);
   const centroid = computeRouteCentroid(curated);
   const hotels = centroid
-    ? await fetchVerifiedHotels(centroid.lat, centroid.lng, summary.region)
+    ? await fetchVerifiedHotels(centroid.lat, centroid.lng, summary.region, adminContext)
     : [];
   const restaurants = centroid
-    ? await fetchVerifiedRestaurants(centroid.lat, centroid.lng, summary.region)
+    ? await fetchVerifiedRestaurants(centroid.lat, centroid.lng, summary.region, adminContext)
     : [];
 
   return {
@@ -603,7 +635,11 @@ async function generateTourPackageDetail(
   };
 }
 
-async function generateWhyChosen(spot: AttractionDoc, packageTitle: string): Promise<string> {
+async function generateWhyChosen(
+  spot: AttractionDoc,
+  packageTitle: string,
+  context?: CurationContext
+): Promise<string> {
   if (!hasGeminiApiKey()) {
     return `Essential stop on the ${packageTitle} route — ${spot.name} ranks among the region's top-rated attractions.`;
   }
@@ -615,10 +651,13 @@ async function generateWhyChosen(spot: AttractionDoc, packageTitle: string): Pro
       spot.rating,
       spot.userRatingsTotal
     );
-    const responseText = await generateGeminiText("generate_why_chosen", prompt, {
-      spotName: spot.name,
-      packageTitle,
-    });
+    const adminOpts = resolveCurationOptions(context?.quality ?? "user");
+    const responseText = await generateGeminiText(
+      "generate_why_chosen",
+      prompt,
+      { spotName: spot.name, packageTitle },
+      { tier: adminOpts.tier, model: adminOpts.model }
+    );
     return responseText.trim();
   } catch (error) {
     getGuideMeLogger().logFallback("generate_why_chosen", "generation_failed", {
@@ -628,6 +667,26 @@ async function generateWhyChosen(spot: AttractionDoc, packageTitle: string): Pro
     });
     return `Top-reviewed highlight on the ${packageTitle} itinerary.`;
   }
+}
+
+function buildTemplateWhyChosen(spot: AttractionDoc, packageTitle: string): string {
+  const fact = spot.description?.trim() || spot.name;
+  return `Essential stop on ${packageTitle} — ${fact}`;
+}
+
+function buildTemplateTranscript(
+  spotName: string,
+  description: string,
+  packageTitle: string,
+  region: string
+): string {
+  return [
+    `Welcome to ${spotName}, a highlight on your ${packageTitle} journey in ${region}.`,
+    description,
+    `Take your time to explore ${spotName} and notice the details that define this landmark.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function excerptTranscript(transcript: string, maxWords: number): string {
@@ -642,7 +701,8 @@ async function generateTourGuideTranscript(
   spotName: string,
   description: string,
   packageTitle: string,
-  region: string
+  region: string,
+  context?: CurationContext
 ): Promise<string> {
   const grounded = description.trim();
   if (!hasGeminiApiKey()) {
@@ -658,10 +718,13 @@ async function generateTourGuideTranscript(
 
   try {
     const prompt = buildTourGuideTranscriptPrompt(spotName, grounded, packageTitle, region);
-    const responseText = await generateGeminiText("generate_tour_guide_transcript", prompt, {
-      spotName,
-      packageTitle,
-    });
+    const adminOpts = resolveCurationOptions(context?.quality ?? "user");
+    const responseText = await generateGeminiText(
+      "generate_tour_guide_transcript",
+      prompt,
+      { spotName, packageTitle },
+      { tier: adminOpts.tier, model: adminOpts.model }
+    );
     const script = responseText.trim();
     if (script.split(/\s+/).length >= 120) {
       return script;
@@ -691,7 +754,8 @@ async function generateTourGuideTranscript(
 async function generatePackageExtras(
   summary: PackageSummaryDoc,
   countryName: string,
-  spots: AttractionDoc[]
+  spots: AttractionDoc[],
+  context?: CurationContext
 ) {
   const spotNames = spots.map((s) => s.name);
   const daySpotGroups: Record<number, string[]> = {};
@@ -723,10 +787,12 @@ async function generatePackageExtras(
     restaurants: [] as NearbyPlaceDoc[],
   };
 
-  if (!hasGeminiApiKey()) {
-    getGuideMeLogger().logFallback("generate_package_extras", "missing_gemini_api_key", {
-      packageId: summary.id,
-    });
+  if (!hasGeminiApiKey() || isCostSaverMode(context)) {
+    getGuideMeLogger().logFallback(
+      "generate_package_extras",
+      isCostSaverMode(context) ? "cost_saver_mode" : "missing_gemini_api_key",
+      { packageId: summary.id }
+    );
     return fallback;
   }
 
@@ -739,10 +805,13 @@ async function generatePackageExtras(
       spotNames,
       daySpotGroups
     );
-    const responseText = await generateGeminiText("generate_package_extras", prompt, {
-      packageId: summary.id,
-      spotCount: spots.length,
-    });
+    const adminOpts = resolveCurationOptions(context?.quality ?? "user");
+    const responseText = await generateGeminiText(
+      "generate_package_extras",
+      prompt,
+      { packageId: summary.id, spotCount: spots.length },
+      { tier: adminOpts.tier, model: adminOpts.model }
+    );
     const parsed = JSON.parse(extractJsonArray(responseText)) as typeof fallback;
     const merged = {
       overview: parsed.overview || fallback.overview,
@@ -775,22 +844,26 @@ async function generatePackageExtras(
 async function fetchVerifiedHotels(
   lat: number,
   lng: number,
-  region: string
+  region: string,
+  context?: CurationContext
 ): Promise<NearbyPlaceDoc[]> {
   const places = await fetchPlacesNearbyByType(lat, lng, "lodging", 5);
-  const geminiAvailable = hasGeminiApiKey();
+  const useGeminiDescriptions = hasGeminiApiKey() && !isCostSaverMode(context);
+  const adminOpts = resolveCurationOptions(context?.quality ?? "user");
 
   return Promise.all(
     places.map(async (place) => {
       let description = place.description;
-      if (geminiAvailable) {
+      if (useGeminiDescriptions) {
         try {
           const prompt = buildHotelDescriptionPrompt(place.name, region);
           description = (
-            await generateGeminiText("hotel_description", prompt, {
-              hotelName: place.name,
-              region,
-            })
+            await generateGeminiText(
+              "hotel_description",
+              prompt,
+              { hotelName: place.name, region },
+              { tier: adminOpts.tier, model: adminOpts.model }
+            )
           ).trim();
         } catch (error) {
           getGuideMeLogger().warn("hotel_description_failed", {
@@ -814,22 +887,26 @@ async function fetchVerifiedHotels(
 async function fetchVerifiedRestaurants(
   lat: number,
   lng: number,
-  region: string
+  region: string,
+  context?: CurationContext
 ): Promise<NearbyPlaceDoc[]> {
   const places = await fetchPlacesNearbyByType(lat, lng, "restaurant", 5);
-  const geminiAvailable = hasGeminiApiKey();
+  const useGeminiDescriptions = hasGeminiApiKey() && !isCostSaverMode(context);
+  const adminOpts = resolveCurationOptions(context?.quality ?? "user");
 
   return Promise.all(
     places.map(async (place) => {
       let description = place.description;
-      if (geminiAvailable) {
+      if (useGeminiDescriptions) {
         try {
           const prompt = buildRestaurantDescriptionPrompt(place.name, region);
           description = (
-            await generateGeminiText("restaurant_description", prompt, {
-              restaurantName: place.name,
-              region,
-            })
+            await generateGeminiText(
+              "restaurant_description",
+              prompt,
+              { restaurantName: place.name, region },
+              { tier: adminOpts.tier, model: adminOpts.model }
+            )
           ).trim();
         } catch (error) {
           getGuideMeLogger().warn("restaurant_description_failed", {

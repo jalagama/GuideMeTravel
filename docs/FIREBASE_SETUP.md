@@ -179,22 +179,21 @@ firebase deploy --only functions
 
 ### Admin console (hosting)
 
-Static UI at `backend/admin/public/index.html`. Deploy hosting from the `backend/` directory (see below).
+Static UI at `backend/admin/public/index.html`. Deploy hosting from the `backend/` directory:
 
 ```bash
 cd backend
 firebase deploy --only hosting
 ```
 
-Open the hosting URL, sign in with Google (admin account), start curation for a country.
+Open the hosting URL, sign in with Google (admin account), click **Curate [country] — full catalog + guides**. One click runs the entire job automatically (progress bar + browser notification on completion). Keep Gemini prepay and GCP billing topped up.
 
-### Curation modes
+Optional env for server-side auto-continue between batches:
 
-| Mode | Use |
-|------|-----|
-| `catalog_only` | Genres, packages, tour skeleton, destination index — **no** per-language guide TTS |
-| `languages_only` | Add languages to existing catalog (e.g. `hi` after English QA) |
-| `full` | Catalog + all selected languages in one job |
+```bash
+# Defaults to guideme-curation-{projectId} if unset
+firebase functions:secrets:set CURATION_WORKER_SECRET
+```
 
 ### Admin quality (env on Cloud Run / Functions)
 
@@ -208,13 +207,12 @@ GEMINI_USE_BATCH=true
 
 Expert spots (e.g. Hampi core monuments) use Pro; bulk spots use Flash. User-facing search misses still use cost-saver lite models.
 
-### Pilot: India (English then Hindi)
+### India full curation (one click)
 
-1. `adminStartCountryCuration({ countryCode: "IN", mode: "catalog_only", languages: ["en"] })`
-2. Call `adminAdvanceCurationJob({ jobId })` repeatedly until `hasMore: false` (or use Admin UI **Advance**).
-3. QA `tourPackages/in-hampi` and `destinationIndex` in Firestore Console.
-4. `adminStartCountryCuration({ countryCode: "IN", mode: "languages_only", languages: ["hi"] })` and advance again.
-5. Deploy rules/indexes if not already:
+1. Admin UI → country `IN` → select languages (e.g. `en`, `hi`) → **Curate India**
+2. Wait for progress to reach 100% (est. ₹12,000–20,000 and several hours for full India)
+3. QA `tourPackages/in-hampi` in Firestore Console
+4. Deploy rules/indexes if not already:
 
 ```bash
 firebase deploy --only firestore:rules,firestore:indexes

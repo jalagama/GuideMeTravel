@@ -51,6 +51,8 @@ export type CurationJobDoc = {
   startedBy: string;
   startedAtMillis: number;
   updatedAtMillis: number;
+  /** When true, server + admin UI auto-continue batches until complete */
+  autoRun?: boolean;
 };
 
 export function createJobId(countryCode: string): string {

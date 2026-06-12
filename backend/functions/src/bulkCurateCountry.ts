@@ -77,12 +77,12 @@ export async function startCountryCuration(input: StartCurationInput): Promise<{
     startedBy: input.startedBy,
     startedAtMillis: Date.now(),
     updatedAtMillis: Date.now(),
+    autoRun: true,
   };
 
   await db.collection("curationJobs").doc(jobId).set(job);
   getGuideMeLogger().info("curation_job_started", { jobId, countryCode, mode: input.mode });
 
-  await advanceCurationJob(jobId);
   return { jobId };
 }
 
@@ -295,7 +295,7 @@ async function runGuidesPhase(
   }
 
   const spots = await collectSpotsForCountry(job.countryCode);
-  const batchSize = 10;
+  const batchSize = 15;
   let tasks = job.pendingGuideTasks;
 
   if (tasks.length === 0 && job.mode === "languages_only") {

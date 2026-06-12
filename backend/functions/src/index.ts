@@ -1,5 +1,5 @@
 import "./firebaseAdmin";
-import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import { createTripFromSearch } from "./resolveSearchTrip";
 import { generateGuidePackForTrip, getGuidePackForTrip } from "./generateGuidePack";
@@ -9,7 +9,14 @@ import {
   getGenrePackages as getGenrePackagesService,
   getTourPackageDetail as getTourPackageDetailService,
 } from "./curatedContent";
-import { advanceCurationJob, getCurationJob, listCurationJobs, startCountryCuration } from "./bulkCurateCountry";
+import { getCurationJob, listCurationJobs, startCountryCuration } from "./bulkCurateCountry";
+import { buildCurationProgressView, estimateCountryCuration } from "./curationEstimate";
+import {
+  runCurationBatch,
+  runCurationBatchAndSchedule,
+  scheduleCurationBatch,
+  verifyWorkerSecret,
+} from "./curationRunner";
 import { requireAdmin } from "./admin/requireAdmin";
 import { setAdminClaimForUid } from "./admin/setAdminClaim";
 import type { CurationMode } from "./curationTypes";
@@ -330,11 +337,22 @@ export const adminStartCountryCuration = onCall(
       throw new HttpsError("invalid-argument", "Invalid curation mode.");
     }
 
-    return startCountryCuration({ countryCode, languages, mode, startedBy: uid });
+    const estimate = estimateCountryCuration({ countryCode, mode, languages });
+    const { jobId } = await startCountryCuration({
+      countryCode,
+      languages,
+      mode,
+      startedBy: uid,
+    });
+
+    await scheduleCurationBatch(jobId);
+
+    return { jobId, estimate, autoRun: true, message: estimate.summary };
   }
 );
 
-export const adminAdvanceCurationJob = onCall(
+/** Runs one long batch (used by admin UI auto-loop and manual recovery). */
+export const adminRunCurationBatch = onCall(
   {
     region: "asia-south1",
     timeoutSeconds: 540,
@@ -351,14 +369,71 @@ export const adminAdvanceCurationJob = onCall(
       throw new HttpsError("invalid-argument", "jobId is required.");
     }
 
-    let hasMore = true;
-    let steps = 0;
-    while (hasMore && steps < 25) {
-      hasMore = await advanceCurationJob(jobId);
-      steps += 1;
+    const result = await runCurationBatch(jobId);
+    if (result.hasMore && result.status === "running") {
+      await scheduleCurationBatch(jobId);
+    }
+    return result;
+  }
+);
+
+/** Server-to-server auto-continue (invoked by scheduleCurationBatch). */
+export const adminProcessCurationBatch = onRequest(
+  {
+    region: "asia-south1",
+    timeoutSeconds: 540,
+    secrets: [geminiApiKey, googleMapsApiKey],
+    invoker: "public",
+  },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "POST only" });
+      return;
     }
 
-    return { jobId, stepsProcessed: steps, hasMore };
+    const secret = req.headers["x-curation-worker-secret"];
+    if (!verifyWorkerSecret(typeof secret === "string" ? secret : undefined)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+
+    bindCallableSecrets();
+
+    const jobId = String(req.body?.jobId ?? "").trim();
+    if (!jobId) {
+      res.status(400).json({ error: "jobId is required" });
+      return;
+    }
+
+    try {
+      const result = await runCurationBatchAndSchedule(jobId);
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      res.status(500).json({ error: message });
+    }
+  }
+);
+
+export const adminEstimateCuration = onCall(
+  {
+    region: "asia-south1",
+    timeoutSeconds: 30,
+    enforceAppCheck: false,
+    invoker: "public",
+  },
+  async (request) => {
+    requireAdmin(request);
+    const countryCode = String(request.data.countryCode ?? "").trim();
+    const mode = String(request.data.mode ?? "full") as CurationMode;
+    const languagesRaw = request.data.languages;
+    const languages = Array.isArray(languagesRaw)
+      ? languagesRaw.map((lang) => String(lang))
+      : ["en"];
+    if (!countryCode) {
+      throw new HttpsError("invalid-argument", "countryCode is required.");
+    }
+    return estimateCountryCuration({ countryCode, mode, languages });
   }
 );
 
@@ -379,7 +454,10 @@ export const adminGetCurationStatus = onCall(
     if (!job) {
       throw new HttpsError("not-found", `Job ${jobId} not found.`);
     }
-    return job;
+    return {
+      ...job,
+      progress: buildCurationProgressView(job),
+    };
   }
 );
 

@@ -139,7 +139,7 @@
 </head>
 <body>
   <h1>GuideMe Travel — Admin</h1>
-  <p class="sub">One-click country curation: genres, packages, trip details, search index, and offline guide audio → Firestore.</p>
+  <p class="sub">Discovery-first curation: genres, packages, trip details, and search index → Firestore. Full offline guides generate on demand or via manual curation.</p>
 
   <p id="auth-status">Sign in to continue.</p>
   <div class="auth-row">
@@ -152,16 +152,36 @@
     <div id="banner" class="banner hidden"></div>
 
     <div class="card">
-      <h2>Curate country (end-to-end)</h2>
+      <h2>Generate country (discovery)</h2>
       <label>Country code
         <input id="country-code" value="IN" maxlength="2" placeholder="IN" />
       </label>
-      <p style="margin:0.75rem 0 0.25rem;font-size:0.9rem;">Offline guide languages</p>
+      <p style="margin:0.75rem 0 0.25rem;font-size:0.9rem;">Offline guide languages (for optional bulk pre-generation only)</p>
       <div id="languages" class="lang-grid"></div>
       <p style="font-size:0.82rem;color:var(--muted);margin:0.75rem 0 0;">
-        One click seeds Firestore for the whole country. The job runs automatically — keep this tab open or check back later.
+        Generates genres, destinations, discovery packages (summaries + audio previews), and search index. Does not pre-generate full narrations or offline audio.
       </p>
-      <button id="curate-country" class="primary">Curate India — full catalog + guides</button>
+      <button id="curate-country" class="primary">Generate India — discovery catalog</button>
+    </div>
+
+    <div class="card">
+      <h2>Generate full guide (manual)</h2>
+      <label>Package ID
+        <input id="full-guide-package-id" placeholder="in-hampi" />
+      </label>
+      <p style="margin:0.75rem 0 0.25rem;font-size:0.9rem;">Languages for full narration + TTS</p>
+      <div id="full-guide-languages" class="lang-grid"></div>
+      <button id="generate-full-guide" class="primary" style="margin-top:1rem;">Generate full guide</button>
+      <p id="full-guide-status" style="font-size:0.88rem;color:var(--muted);margin:0.75rem 0 0;"></p>
+    </div>
+
+    <div class="card">
+      <h2>Popular destinations</h2>
+      <p style="font-size:0.82rem;color:var(--muted);margin:0 0 0.75rem;">
+        Destinations with viewCount &gt; 100 or downloadCount &gt; 100. Use manual full-guide generation for high-intent trips.
+      </p>
+      <button id="refresh-popularity" class="ghost">Refresh list</button>
+      <div id="popularity-list" style="margin-top:0.75rem;font-size:0.88rem;"></div>
     </div>
 
     <div class="card" id="estimate-card">
@@ -219,19 +239,25 @@
     const functions = getFunctions(app, 'asia-south1');
 
     const langEl = document.getElementById('languages');
+    const fullGuideLangEl = document.getElementById('full-guide-languages');
     SUPPORTED_LANGS.forEach(([code, name]) => {
       const label = document.createElement('label');
       label.innerHTML = `<input type="checkbox" value="${code}" ${code === 'en' ? 'checked' : ''} /> ${name}`;
       langEl.appendChild(label);
+      const fgLabel = document.createElement('label');
+      fgLabel.innerHTML = `<input type="checkbox" value="${code}" ${code === 'en' ? 'checked' : ''} /> ${name}`;
+      fullGuideLangEl.appendChild(fgLabel);
     });
+
+    const DISCOVERY_MODE = 'catalog_only';
 
     let activeJobId = localStorage.getItem('guideme_active_curation_job') || '';
     let pollTimer = null;
     let batchLoopRunning = false;
     let notifiedComplete = false;
 
-    function selectedLanguages() {
-      return [...document.querySelectorAll('#languages input:checked')].map(el => el.value);
+    function selectedLanguages(containerId = 'languages') {
+      return [...document.querySelectorAll(`#${containerId} input:checked`)].map(el => el.value);
     }
 
     async function callAdmin(name, data) {
@@ -257,7 +283,7 @@
       try {
         const est = await callAdmin('adminEstimateCuration', {
           countryCode,
-          mode: 'full',
+          mode: DISCOVERY_MODE,
           languages: selectedLanguages(),
         });
         renderEstimate(est);
@@ -270,11 +296,11 @@
       const dl = document.getElementById('estimate-dl');
       const d = est.data;
       const btn = document.getElementById('curate-country');
-      btn.textContent = `Curate ${est.countryCode} — full catalog + guides`;
+      btn.textContent = `Generate ${est.countryCode} — discovery catalog`;
       dl.innerHTML = `
-        <dt>Trip packages</dt><dd>~${d.tourPackageDetails} full itineraries</dd>
+        <dt>Trip packages</dt><dd>~${d.tourPackageDetails} discovery itineraries</dd>
         <dt>Genres</dt><dd>~${d.genres}</dd>
-        <dt>Guide audio files</dt><dd>~${d.guideAudioFiles.toLocaleString()}</dd>
+        <dt>Guide audio files</dt><dd>${d.guideAudioFiles > 0 ? `~${d.guideAudioFiles.toLocaleString()} (bulk mode only)` : '0 — generated on download'}</dd>
         <dt>Est. cost (total)</dt><dd>₹${est.costInr.total.toLocaleString()} (~$${est.costUsd.total})</dd>
         <dt>Gemini prepay</dt><dd>₹${est.costInr.geminiPrepay.toLocaleString()}</dd>
         <dt>GCP billing (TTS/Maps)</dt><dd>₹${est.costInr.gcpBilling.toLocaleString()}</dd>
@@ -293,9 +319,9 @@
       document.getElementById('job-id-display').textContent = job.countryCode ? `${activeJobId}` : '—';
       document.getElementById('job-status').textContent = JSON.stringify(job, null, 2);
 
-      const phases = ['genres', 'packages', 'details', 'index', 'guides'];
-      const labels = { genres: 'Genres', packages: 'Lists', details: 'Details', index: 'Index', guides: 'Audio' };
-      const order = { queued: 0, genres: 1, packages: 2, details: 3, index: 4, guides: 5, completed: 6, failed: -1 };
+      const phases = ['genres', 'packages', 'details', 'index'];
+      const labels = { genres: 'Genres', packages: 'Lists', details: 'Discovery', index: 'Index' };
+      const order = { queued: 0, genres: 1, packages: 2, details: 3, index: 4, completed: 5, failed: -1, guides: 4 };
       const current = order[job.phase] ?? 0;
       document.getElementById('phase-pills').innerHTML = phases.map((ph, i) => {
         const idx = i + 1;
@@ -307,11 +333,11 @@
 
       if (p.isComplete && !notifiedComplete) {
         notifiedComplete = true;
-        showBanner('ok', `✓ ${job.countryCode} curation complete! All data is in Firestore. The Android app reads from cache — no more admin steps needed.`);
+        showBanner('ok', `✓ ${job.countryCode} discovery catalog complete! Browse content is in Firestore. Full guides generate on download or via manual curation.`);
         document.getElementById('curate-country').disabled = false;
         if (Notification.permission === 'granted') {
-          new Notification('GuideMe curation complete', {
-            body: `${job.countryCode} catalog and guides are ready in Firestore.`,
+          new Notification('GuideMe discovery catalog complete', {
+            body: `${job.countryCode} browse content is ready in Firestore.`,
           });
         }
         localStorage.removeItem('guideme_active_curation_job');
@@ -397,6 +423,7 @@
           Notification.requestPermission();
         }
         await refreshEstimate();
+        await refreshPopularity();
         if (activeJobId) {
           notifiedComplete = false;
           document.getElementById('progress-card').classList.remove('hidden');
@@ -423,18 +450,71 @@
       alert('Admin claim set. Sign out and sign in again.');
     };
 
+    async function refreshPopularity() {
+      const countryCode = document.getElementById('country-code').value.trim().toUpperCase();
+      const listEl = document.getElementById('popularity-list');
+      try {
+        const data = await callAdmin('adminListPopularDestinations', {
+          countryCode: countryCode || undefined,
+          limit: 30,
+        });
+        const rows = data.destinations || [];
+        if (rows.length === 0) {
+          listEl.innerHTML = '<p style="color:var(--muted);margin:0;">No destinations over threshold yet.</p>';
+          return;
+        }
+        listEl.innerHTML = rows.map(row => {
+          const hot = row.viewCount > 100 || row.downloadCount > 100;
+          const status = row.generationStatus || 'PREVIEW_READY';
+          return `<div style="padding:0.5rem 0;border-bottom:1px solid var(--border);${hot ? 'font-weight:600;' : ''}">
+            <code>${row.packageId}</code> — views ${row.viewCount}, downloads ${row.downloadCount}, status ${status}
+            <button class="ghost" style="margin-left:0.5rem;padding:0.2rem 0.5rem;font-size:0.75rem;" data-package-id="${row.packageId}">Generate full guide</button>
+          </div>`;
+        }).join('');
+        listEl.querySelectorAll('button[data-package-id]').forEach(btn => {
+          btn.onclick = async () => {
+            document.getElementById('full-guide-package-id').value = btn.dataset.packageId;
+            await runFullGuideGeneration(btn.dataset.packageId);
+          };
+        });
+      } catch (e) {
+        listEl.innerHTML = `<p style="color:var(--err);margin:0;">${e.message}</p>`;
+      }
+    }
+
+    async function runFullGuideGeneration(packageId) {
+      const languages = selectedLanguages('full-guide-languages');
+      if (!packageId) return alert('Enter a package ID');
+      if (languages.length === 0) return alert('Select at least one language');
+      const statusEl = document.getElementById('full-guide-status');
+      statusEl.textContent = `Generating full guide for ${packageId}…`;
+      try {
+        const result = await callAdmin('adminGenerateFullGuide', { packageId, languages });
+        statusEl.textContent = `Done — ${result.guidesGenerated} guide files, status ${result.generationStatus}.`;
+        await refreshPopularity();
+      } catch (e) {
+        statusEl.textContent = `Failed: ${e.message}`;
+      }
+    }
+
+    document.getElementById('refresh-popularity').onclick = refreshPopularity;
+    document.getElementById('generate-full-guide').onclick = async () => {
+      const packageId = document.getElementById('full-guide-package-id').value.trim();
+      await runFullGuideGeneration(packageId);
+    };
+
     document.getElementById('curate-country').onclick = async () => {
       const countryCode = document.getElementById('country-code').value.trim().toUpperCase();
       const languages = selectedLanguages();
-      if (!countryCode) return alert('Enter a country code');
-      if (languages.length === 0) return alert('Select at least one guide language');
 
-      const est = await callAdmin('adminEstimateCuration', { countryCode, mode: 'full', languages });
+      if (!countryCode) return alert('Enter a country code');
+
+      const est = await callAdmin('adminEstimateCuration', { countryCode, mode: DISCOVERY_MODE, languages });
       const ok = confirm(
-        `Curate ${countryCode} end-to-end?\n\n` +
-        `~${est.data.tourPackageDetails} trips, ~${est.data.guideAudioFiles} audio files\n` +
+        `Generate ${countryCode} discovery catalog?\n\n` +
+        `~${est.data.tourPackageDetails} trips (summaries + audio previews, no bulk offline audio)\n` +
         `Est. cost: ₹${est.costInr.total.toLocaleString()} | Time: ${est.duration.totalHoursMin}–${est.duration.totalHoursMax} hours\n\n` +
-        `This runs automatically. Keep Gemini credits and GCP billing topped up.`
+        `Full guides generate lazily on user download or via manual curation.`
       );
       if (!ok) return;
 
@@ -445,7 +525,7 @@
       const data = await callAdmin('adminStartCountryCuration', {
         countryCode,
         languages,
-        mode: 'full',
+        mode: DISCOVERY_MODE,
       });
 
       activeJobId = data.jobId;

@@ -170,16 +170,55 @@ Cite specific significance: UNESCO status, architectural style, historical role,
 No vague praise. Plain text only.`;
 }
 
+export function buildAttractionSummaryPrompt(
+  spotName: string,
+  description: string,
+  packageTitle: string,
+  region: string
+): string {
+  return `${EDITORIAL_PERSONA}
+
+Write a factual attraction summary for "${spotName}" in ${region}, part of the "${packageTitle}" itinerary.
+
+LENGTH: 50–80 words.
+
+GROUND FACTS (use only these; do not invent dates, names, or claims):
+${description}
+
+RULES:
+- Third person, encyclopedic tone suitable for a trip browsing screen.
+- Name what makes this place significant (UNESCO, dynasty, natural feature, etc.).
+- No vague praise. Plain text only.`;
+}
+
+export function buildAudioPreviewPrompt(
+  spotName: string,
+  description: string,
+  packageTitle: string,
+  region: string
+): string {
+  return `${TOUR_GUIDE_PERSONA}
+
+Write a spoken audio preview teaser for tourists considering "${spotName}" on the "${packageTitle}" trip in ${region}.
+
+LENGTH: 80–120 words when read aloud (~45–60 seconds).
+
+GROUND FACTS (use only these; do not invent details):
+${description}
+
+RULES:
+- Second person ("you"), warm and engaging — a taste of the full on-site guide.
+- Tease why this stop matters; do not deliver the full tour narration.
+- No bullet points or stage directions. Plain text only, ready for text-to-speech.`;
+}
+
+/** @deprecated Use buildAudioPreviewPrompt */
 export function buildPreviewSnippetPrompt(
   spotName: string,
   description: string,
   packageTitle: string
 ): string {
-  return `${EDITORIAL_PERSONA}
-
-Write a 30-second audio teaser script (60–80 words) for a tourist previewing "${spotName}" on the "${packageTitle}" trip.
-Ground facts: ${description}
-Conversational, engaging, factual. Do not invent details not in the facts. Plain text only.`;
+  return buildAudioPreviewPrompt(spotName, description, packageTitle, "");
 }
 
 export const TOUR_GUIDE_PERSONA = `You are a professional, warm, licensed tour guide speaking directly to visitors who just arrived on foot.
@@ -195,7 +234,7 @@ export function buildTourGuideTranscriptPrompt(
 
 Write a spoken audio guide script for tourists at "${spotName}" (${region}), part of the "${packageTitle}" journey.
 
-LENGTH: 2.5 to 3.5 minutes when read aloud (350–500 words).
+LENGTH: 2.5 to 3.5 minutes when read aloud (250–400 words).
 
 STRUCTURE (as flowing prose, not bullet points):
 1. Welcome visitors and orient them — what they are looking at right now.
@@ -223,7 +262,7 @@ export function buildAttractionGuideScriptPrompt(
 Write a spoken audio guide script for a tourist arriving at "${attractionName}".
 Language: ${languageCode === "en" ? "English" : languageCode}.
 
-LENGTH: 2.5 to 3.5 minutes when read aloud (350–500 words).
+LENGTH: 2.5 to 3.5 minutes when read aloud (250–400 words).
 
 GROUND FACTS (use only these):
 ${groundedFacts}

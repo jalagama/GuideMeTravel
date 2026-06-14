@@ -9,6 +9,11 @@ import { getGuideMeLogger } from "./logging/loggerContext";
 import { buildAttractionGuideScriptPrompt } from "./prompts/curatedPrompts";
 import { hasGeminiApiKey } from "./geminiClient";
 import {
+  recordPackageDownload,
+  syncPopularityGenerationStatus,
+} from "./destinationPopularity";
+import type { GenerationStatus } from "./curationTypes";
+import {
   runWithConcurrency,
   validateLanguageCode,
   type SupportedLanguageCode,
@@ -18,6 +23,9 @@ const ttsClient = new textToSpeech.TextToSpeechClient();
 const translateClient = new Translate();
 const GUIDE_PACK_CONCURRENCY = 3;
 const SIGNED_URL_TTL_MS = 1000 * 60 * 60;
+/** Matches Android TripGuideForegroundService geofence radius. */
+const GEO_TRIGGER_RADIUS_METERS = 400;
+const MIN_FULL_NARRATION_WORDS = 150;
 
 type GenerateGuidePackInput = {
   userId: string;
@@ -33,6 +41,12 @@ type Attraction = {
   orderIndex: number;
   estimatedMinutes: number;
   transcript?: string;
+};
+
+type GeoTriggerMetadata = {
+  latitude: number;
+  longitude: number;
+  triggerRadiusMeters: number;
 };
 
 type AudioFileResult = {
@@ -96,31 +110,57 @@ export async function generateGuidePackForTrip(input: GenerateGuidePackInput) {
 
   const attractions = (trip.attractions ?? []) as Attraction[];
   const languageCode = validateLanguageCode(String(trip.languageCode ?? "en"));
+  const packageId = String(trip.packageId ?? "").trim();
 
-  const audioFiles = await runWithConcurrency(
-    attractions,
-    GUIDE_PACK_CONCURRENCY,
-    (attraction) => generateGuideForAttraction(attraction, languageCode)
-  );
+  if (packageId) {
+    await setTourPackageGenerationStatus(packageId, "GUIDE_GENERATING");
+  }
 
-  await db.collection("trips").doc(input.tripId).update({
-    offlinePackDownloaded: true,
-    status: "READY",
-    guidePackGeneratedAtMillis: Date.now(),
-  });
+  try {
+    const audioFiles = await runWithConcurrency(
+      attractions,
+      GUIDE_PACK_CONCURRENCY,
+      (attraction) => generateGuideForAttraction(attraction, languageCode)
+    );
 
-  getGuideMeLogger().info("guide_pack_generated", {
-    tripId: input.tripId,
-    userId: input.userId,
-    languageCode,
-    attractionCount: attractions.length,
-  });
+    await db.collection("trips").doc(input.tripId).update({
+      offlinePackDownloaded: true,
+      status: "READY",
+      guidePackGeneratedAtMillis: Date.now(),
+    });
 
-  return {
-    tripId: input.tripId,
-    languageCode,
-    audioFiles,
-  };
+    if (packageId) {
+      await setTourPackageGenerationStatus(packageId, "GUIDE_READY");
+      const packageSnap = await db.collection("tourPackages").doc(packageId).get();
+      const packageData = packageSnap.data();
+      await recordPackageDownload(
+        packageId,
+        String(packageData?.countryCode ?? ""),
+        String(packageData?.title ?? ""),
+        "GUIDE_READY"
+      );
+    }
+
+    getGuideMeLogger().info("guide_pack_generated", {
+      tripId: input.tripId,
+      userId: input.userId,
+      languageCode,
+      attractionCount: attractions.length,
+      packageId: packageId || undefined,
+    });
+
+    return {
+      tripId: input.tripId,
+      languageCode,
+      audioFiles,
+    };
+  } catch (error) {
+    if (packageId) {
+      await setTourPackageGenerationStatus(packageId, "FAILED");
+      await syncPopularityGenerationStatus(packageId, "FAILED");
+    }
+    throw error;
+  }
 }
 
 async function generateGuideForAttraction(
@@ -144,6 +184,7 @@ async function generateGuideForAttraction(
   const { transcript, source } = await resolveGuideTranscript(attraction, languageCode);
   const storagePath = `guide-audio/${attraction.id}/${languageCode}/guide.mp3`;
   const audio = await trySynthesizeAndUpload(storagePath, languageCode, transcript);
+  const geoTrigger = buildGeoTriggerMetadata(attraction);
 
   await db
     .collection("attractions")
@@ -156,6 +197,7 @@ async function generateGuideForAttraction(
       audioAvailable: audio.audioAvailable,
       updatedAtMillis: Date.now(),
       source,
+      geoTrigger,
     });
 
   return {
@@ -194,7 +236,7 @@ async function resolveGuideTranscript(
   languageCode: SupportedLanguageCode
 ): Promise<{ transcript: string; source: string }> {
   const existing = attraction.transcript?.trim();
-  if (existing) {
+  if (existing && existing.split(/\s+/).filter(Boolean).length >= MIN_FULL_NARRATION_WORDS) {
     return { transcript: existing, source: "itinerary" };
   }
 
@@ -309,4 +351,26 @@ export async function createSignedUrl(storagePath: string): Promise<string> {
     expires: Date.now() + SIGNED_URL_TTL_MS,
   });
   return signedUrl;
+}
+
+function buildGeoTriggerMetadata(attraction: Attraction): GeoTriggerMetadata {
+  return {
+    latitude: attraction.latitude,
+    longitude: attraction.longitude,
+    triggerRadiusMeters: GEO_TRIGGER_RADIUS_METERS,
+  };
+}
+
+async function setTourPackageGenerationStatus(
+  packageId: string,
+  generationStatus: GenerationStatus
+): Promise<void> {
+  await db.collection("tourPackages").doc(packageId).set(
+    {
+      generationStatus,
+      updatedAtMillis: Date.now(),
+    },
+    { merge: true }
+  );
+  await syncPopularityGenerationStatus(packageId, generationStatus);
 }

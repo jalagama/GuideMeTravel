@@ -18,12 +18,16 @@ import {
 const ttsClient = new textToSpeech.TextToSpeechClient();
 const translateClient = new Translate();
 const GUIDE_PREGEN_CONCURRENCY = 3;
+const GEO_TRIGGER_RADIUS_METERS = 400;
+const MIN_FULL_NARRATION_WORDS = 150;
 
 export type GuideAttractionInput = {
   id: string;
   name: string;
   description: string;
   transcript?: string;
+  latitude?: number;
+  longitude?: number;
 };
 
 export async function pregenGuideContentForSpot(
@@ -79,6 +83,7 @@ export async function pregenGuideContentForSpot(
       audioAvailable,
       updatedAtMillis: Date.now(),
       source,
+      geoTrigger: buildGeoTriggerMetadata(spot),
     });
 }
 
@@ -101,7 +106,7 @@ async function resolveGuideTranscript(
   context: CurationContext
 ): Promise<{ transcript: string; source: string }> {
   const existing = attraction.transcript?.trim();
-  if (existing) {
+  if (existing && existing.split(/\s+/).filter(Boolean).length >= MIN_FULL_NARRATION_WORDS) {
     if (languageCode === "en") {
       return { transcript: existing, source: "package" };
     }
@@ -170,6 +175,17 @@ async function buildGuideScript(
   return { script, source };
 }
 
+function buildGeoTriggerMetadata(spot: GuideAttractionInput) {
+  if (spot.latitude == null || spot.longitude == null) {
+    return null;
+  }
+  return {
+    latitude: spot.latitude,
+    longitude: spot.longitude,
+    triggerRadiusMeters: GEO_TRIGGER_RADIUS_METERS,
+  };
+}
+
 async function synthesizeAndUpload(
   storagePath: string,
   languageCode: SupportedLanguageCode,
@@ -209,6 +225,8 @@ export async function collectSpotsForCountry(countryCode: string): Promise<Guide
       name?: string;
       description?: string;
       transcript?: string;
+      latitude?: number;
+      longitude?: number;
     }>;
     for (const spot of packageSpots) {
       const id = spot.id ?? doc.id;
@@ -218,6 +236,8 @@ export async function collectSpotsForCountry(countryCode: string): Promise<Guide
         name: String(spot.name ?? id),
         description: String(spot.description ?? ""),
         transcript: spot.transcript,
+        latitude: typeof spot.latitude === "number" ? spot.latitude : undefined,
+        longitude: typeof spot.longitude === "number" ? spot.longitude : undefined,
       });
     }
   }

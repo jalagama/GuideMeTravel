@@ -19,6 +19,10 @@ import {
 } from "./curationRunner";
 import { requireAdmin } from "./admin/requireAdmin";
 import { setAdminClaimForUid } from "./admin/setAdminClaim";
+import {
+  generateFullGuideForPackage,
+  listPopularDestinationsForAdmin,
+} from "./adminGenerateFullGuide";
 import type { CurationMode } from "./curationTypes";
 import { enforceRateLimit } from "./rateLimit";
 import { logEvent, toHttpsError, validateLanguageCode } from "./utils";
@@ -494,5 +498,54 @@ export const adminSetAdminClaim = onCall(
     const targetUid = String(request.data.uid ?? request.auth.uid).trim();
     await setAdminClaimForUid(targetUid, request.auth.uid);
     return { uid: targetUid, admin: true };
+  }
+);
+
+export const adminGenerateFullGuide = onCall(
+  {
+    region: "asia-south1",
+    timeoutSeconds: 540,
+    secrets: [geminiApiKey],
+    enforceAppCheck: false,
+    invoker: "public",
+  },
+  async (request) => {
+    bindGeminiSecret();
+    requireAdmin(request);
+
+    const packageId = String(request.data.packageId ?? "").trim();
+    const languagesRaw = request.data.languages;
+    const languages = Array.isArray(languagesRaw)
+      ? languagesRaw.map((lang) => String(lang))
+      : ["en"];
+
+    if (!packageId) {
+      throw new HttpsError("invalid-argument", "packageId is required.");
+    }
+
+    try {
+      return await generateFullGuideForPackage({ packageId, languages });
+    } catch (error) {
+      throw toHttpsError(error);
+    }
+  }
+);
+
+export const adminListPopularDestinations = onCall(
+  {
+    region: "asia-south1",
+    timeoutSeconds: 30,
+    enforceAppCheck: false,
+    invoker: "public",
+  },
+  async (request) => {
+    requireAdmin(request);
+    const countryCode = String(request.data.countryCode ?? "").trim();
+    const limit = Number(request.data.limit ?? 50);
+    const destinations = await listPopularDestinationsForAdmin({
+      countryCode: countryCode || undefined,
+      limit,
+    });
+    return { destinations };
   }
 );

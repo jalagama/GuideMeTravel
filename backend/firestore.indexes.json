@@ -15,6 +15,14 @@
         { "fieldPath": "countryCode", "order": "ASCENDING" },
         { "fieldPath": "startedAtMillis", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "destination_popularity",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "countryCode", "order": "ASCENDING" },
+        { "fieldPath": "downloadCount", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

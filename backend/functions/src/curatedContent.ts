@@ -19,20 +19,22 @@ import {
 } from "./mapsHelpers";
 import { curateDestinationAttractions } from "./curateAttractions";
 import {
+  buildAttractionSummaryPrompt,
+  buildAudioPreviewPrompt,
   buildGenresPrompt,
   buildHotelDescriptionPrompt,
   buildPackageExtrasPrompt,
   buildPackagesFillPrompt,
   buildPackagesPrompt,
   buildRestaurantDescriptionPrompt,
-  buildTourGuideTranscriptPrompt,
   buildWhyChosenPrompt,
 } from "./prompts/curatedPrompts";
 import { generateGeminiText } from "./logging/geminiLogging";
 import { getGuideMeLogger } from "./logging/loggerContext";
 import { hasGeminiApiKey } from "./geminiClient";
 import { isCostSaverMode, resolveCurationOptions } from "./geminiConfig";
-import type { CurationContext } from "./curationTypes";
+import type { CurationContext, GenerationStatus } from "./curationTypes";
+import { recordPackageView, syncPopularityGenerationStatus } from "./destinationPopularity";
 
 type GenreDoc = {
   id: string;
@@ -81,6 +83,7 @@ type TourPackageDetailDoc = {
   restaurants: NearbyPlaceDoc[];
   schemaVersion: number;
   createdAtMillis: number;
+  generationStatus?: GenerationStatus;
 };
 
 const TARGET_PACKAGE_COUNT = 30;
@@ -172,7 +175,13 @@ export async function getTourPackageDetail(
     getGuideMeLogger().logCacheHit("tourPackages", packageId, {
       schemaVersion: cached.data()?.schemaVersion,
     });
-    return cached.data();
+    const data = cached.data()!;
+    void recordPackageView(
+      packageId,
+      String(data.countryCode ?? countryCode ?? ""),
+      String(data.title ?? "")
+    );
+    return data;
   }
 
   getGuideMeLogger().logCacheMiss("tourPackages", packageId, { countryCode, genreId });
@@ -189,6 +198,11 @@ export async function getTourPackageDetail(
     resolved.countryCode,
     resolved.genreId,
     resolved.summary
+  );
+  void recordPackageView(
+    packageId,
+    resolved.countryCode,
+    String((detail as TourPackageDetailDoc).title ?? resolved.summary.title)
   );
   return detail;
 }
@@ -211,6 +225,17 @@ export async function ensureTourPackageDetail(
   getGuideMeLogger().logCacheMiss("tourPackages", packageSummary.id, { countryCode, genreId });
   const detail = await generateTourPackageDetail(countryCode, genreId, packageSummary, context);
   await cacheRef.set(detail);
+  await syncPopularityGenerationStatus(packageSummary.id, detail.generationStatus ?? "PREVIEW_READY");
+  await db.collection("destination_popularity").doc(packageSummary.id).set(
+    {
+      packageId: packageSummary.id,
+      countryCode: countryCode.trim().toUpperCase(),
+      title: detail.title,
+      generationStatus: detail.generationStatus ?? "PREVIEW_READY",
+      updatedAtMillis: Date.now(),
+    },
+    { merge: true }
+  );
   getGuideMeLogger().info("tour_package_detail_generated", {
     packageId: packageSummary.id,
     spotCount: detail.spots.length,
@@ -248,7 +273,7 @@ export async function createTripFromPackage(input: {
     imageUrl: spot.imageUrl ?? null,
     orderIndex: spot.orderIndex ?? index,
     estimatedMinutes: spot.estimatedMinutes ?? 45,
-    transcript: spot.transcript ?? `Welcome to ${spot.name}. ${spot.description}`,
+    transcript: spot.transcript?.trim() || null,
   }));
 
   const offlinePackSizeMb = Math.ceil(attractions.length * 2.5 + 45);
@@ -584,23 +609,31 @@ async function generateTourPackageDetail(
       const whyChosen = costSaver
         ? buildTemplateWhyChosen(spot, summary.title)
         : await generateWhyChosen(spot, summary.title, adminContext);
-      const transcript = costSaver
-        ? buildTemplateTranscript(spot.name, description, summary.title, summary.region)
-        : await generateTourGuideTranscript(
+      const summaryText = costSaver
+        ? buildTemplateSummary(spot.name, description, summary.title, summary.region)
+        : await generateAttractionSummary(
             spot.name,
             description,
             summary.title,
             summary.region,
             adminContext
           );
-      const previewSnippet = excerptTranscript(transcript, 75);
+      const previewSnippet = costSaver
+        ? buildTemplateAudioPreview(spot.name, summaryText, summary.title, summary.region)
+        : await generateAudioPreview(
+            spot.name,
+            summaryText,
+            summary.title,
+            summary.region,
+            adminContext
+          );
       return {
         ...spot,
         orderIndex: index,
-        description,
+        description: summaryText,
+        summary: summaryText,
         whyChosen,
         previewSnippet,
-        transcript,
       };
     })
   );
@@ -632,6 +665,7 @@ async function generateTourPackageDetail(
     restaurants: restaurants.length > 0 ? restaurants : extras.restaurants,
     schemaVersion: CURATED_SCHEMA_VERSION,
     createdAtMillis: Date.now(),
+    generationStatus: "PREVIEW_READY",
   };
 }
 
@@ -674,30 +708,43 @@ function buildTemplateWhyChosen(spot: AttractionDoc, packageTitle: string): stri
   return `Essential stop on ${packageTitle} — ${fact}`;
 }
 
-function buildTemplateTranscript(
+function buildTemplateSummary(
+  spotName: string,
+  description: string,
+  packageTitle: string,
+  region: string
+): string {
+  const fact = description.trim() || spotName;
+  return `${spotName} in ${region} is a key stop on the ${packageTitle} route. ${fact}`.slice(
+    0,
+    480
+  );
+}
+
+function buildTemplateAudioPreview(
   spotName: string,
   description: string,
   packageTitle: string,
   region: string
 ): string {
   return [
-    `Welcome to ${spotName}, a highlight on your ${packageTitle} journey in ${region}.`,
+    `You're previewing ${spotName}, one of the highlights on your ${packageTitle} journey in ${region}.`,
     description,
-    `Take your time to explore ${spotName} and notice the details that define this landmark.`,
+    `When you arrive, take a moment to soak in why travelers seek out this landmark.`,
   ]
     .filter(Boolean)
     .join(" ");
 }
 
-function excerptTranscript(transcript: string, maxWords: number): string {
-  const words = transcript.trim().split(/\s+/).filter(Boolean);
+function excerptWords(text: string, maxWords: number): string {
+  const words = text.trim().split(/\s+/).filter(Boolean);
   if (words.length <= maxWords) {
-    return transcript.trim();
+    return text.trim();
   }
   return `${words.slice(0, maxWords).join(" ")}…`;
 }
 
-async function generateTourGuideTranscript(
+async function generateAttractionSummary(
   spotName: string,
   description: string,
   packageTitle: string,
@@ -706,49 +753,59 @@ async function generateTourGuideTranscript(
 ): Promise<string> {
   const grounded = description.trim();
   if (!hasGeminiApiKey()) {
-    return [
-      `Welcome — you've arrived at ${spotName}, one of the essential stops on your ${packageTitle} journey.`,
-      grounded,
-      `Take a moment to look around and appreciate why travelers from around the world come to ${region} for this experience.`,
-      "Move at your own pace, stay hydrated, and follow any posted visitor guidelines.",
-    ]
-      .filter(Boolean)
-      .join(" ");
+    return buildTemplateSummary(spotName, grounded, packageTitle, region);
   }
 
   try {
-    const prompt = buildTourGuideTranscriptPrompt(spotName, grounded, packageTitle, region);
+    const prompt = buildAttractionSummaryPrompt(spotName, grounded, packageTitle, region);
     const adminOpts = resolveCurationOptions(context?.quality ?? "user");
     const responseText = await generateGeminiText(
-      "generate_tour_guide_transcript",
+      "generate_attraction_summary",
       prompt,
       { spotName, packageTitle },
       { tier: adminOpts.tier, model: adminOpts.model }
     );
-    const script = responseText.trim();
-    if (script.split(/\s+/).length >= 120) {
-      return script;
-    }
-    getGuideMeLogger().logFallback("generate_tour_guide_transcript", "script_too_short", {
-      spotName,
-      wordCount: script.split(/\s+/).length,
-    });
+    return excerptWords(responseText.trim(), 80);
   } catch (error) {
-    getGuideMeLogger().logFallback("generate_tour_guide_transcript", "generation_failed", {
+    getGuideMeLogger().logFallback("generate_attraction_summary", "generation_failed", {
       spotName,
       packageTitle,
       error: error instanceof Error ? error.message : "unknown",
     });
+    return buildTemplateSummary(spotName, grounded, packageTitle, region);
+  }
+}
+
+async function generateAudioPreview(
+  spotName: string,
+  description: string,
+  packageTitle: string,
+  region: string,
+  context?: CurationContext
+): Promise<string> {
+  const grounded = description.trim();
+  if (!hasGeminiApiKey()) {
+    return buildTemplateAudioPreview(spotName, grounded, packageTitle, region);
   }
 
-  return [
-    `Welcome to ${spotName}. I'm your guide for this stop on the ${packageTitle} route.`,
-    grounded,
-    `As you explore, notice the details that make ${spotName} a defining landmark of ${region}.`,
-    "Allow at least forty-five minutes here, and check local opening hours if you plan to enter any paid areas.",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  try {
+    const prompt = buildAudioPreviewPrompt(spotName, grounded, packageTitle, region);
+    const adminOpts = resolveCurationOptions(context?.quality ?? "user");
+    const responseText = await generateGeminiText(
+      "generate_audio_preview",
+      prompt,
+      { spotName, packageTitle },
+      { tier: adminOpts.tier, model: adminOpts.model }
+    );
+    return excerptWords(responseText.trim(), 120);
+  } catch (error) {
+    getGuideMeLogger().logFallback("generate_audio_preview", "generation_failed", {
+      spotName,
+      packageTitle,
+      error: error instanceof Error ? error.message : "unknown",
+    });
+    return buildTemplateAudioPreview(spotName, grounded, packageTitle, region);
+  }
 }
 
 async function generatePackageExtras(

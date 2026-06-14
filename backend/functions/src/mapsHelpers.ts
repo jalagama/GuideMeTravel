@@ -18,6 +18,8 @@ export type AttractionDoc = {
   transcript?: string;
   day?: number;
   whyChosen?: string;
+  /** 50–80 word factual summary for browsing (discovery phase). */
+  summary?: string;
   previewSnippet?: string;
   rating?: number;
   userRatingsTotal?: number;

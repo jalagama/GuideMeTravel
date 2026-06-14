@@ -4,6 +4,14 @@ export type CurationQuality = "user" | "admin";
 
 export type CurationMode = "full" | "catalog_only" | "languages_only";
 
+/** Lifecycle of offline guide content for a destination package. */
+export type GenerationStatus =
+  | "PREVIEW_READY"
+  | "GUIDE_PENDING"
+  | "GUIDE_GENERATING"
+  | "GUIDE_READY"
+  | "FAILED";
+
 export type CurationJobPhase =
   | "queued"
   | "genres"

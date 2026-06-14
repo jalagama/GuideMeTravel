@@ -19,15 +19,13 @@ import {
 } from "./mapsHelpers";
 import { curateDestinationAttractions } from "./curateAttractions";
 import {
-  buildAttractionSummaryPrompt,
-  buildAudioPreviewPrompt,
   buildGenresPrompt,
   buildHotelDescriptionPrompt,
   buildPackageExtrasPrompt,
+  buildPackageSpotDiscoveryPrompt,
   buildPackagesFillPrompt,
   buildPackagesPrompt,
   buildRestaurantDescriptionPrompt,
-  buildWhyChosenPrompt,
 } from "./prompts/curatedPrompts";
 import { generateGeminiText } from "./logging/geminiLogging";
 import { getGuideMeLogger } from "./logging/loggerContext";
@@ -328,7 +326,7 @@ async function generateGenresWithGemini(
 
   try {
     const prompt = buildGenresPrompt(countryName, countryCode);
-    const adminOpts = resolveCurationOptions(context?.quality ?? "user");
+    const adminOpts = resolveCurationOptions(context?.quality ?? "user", "generate_genres");
     const responseText = await generateGeminiText("generate_genres", prompt, {
       countryCode,
       countryName,
@@ -447,7 +445,7 @@ async function fetchPackagesFromGemini(
   context?: CurationContext
 ): Promise<PackageSummaryDoc[]> {
   const prompt = buildPackagesPrompt(countryName, countryCode, genre.name, genre.type);
-  const adminOpts = resolveCurationOptions(context?.quality ?? "user");
+  const adminOpts = resolveCurationOptions(context?.quality ?? "user", "fetch_packages");
   const responseText = await generateGeminiText(
     "fetch_packages",
     prompt,
@@ -481,7 +479,7 @@ async function fetchPackagesFillFromGemini(
     existingTitles,
     needed
   );
-  const adminOpts = resolveCurationOptions(context?.quality ?? "user");
+  const adminOpts = resolveCurationOptions(context?.quality ?? "user", "fetch_packages_fill");
   const responseText = await generateGeminiText(
     "fetch_packages_fill",
     prompt,
@@ -602,41 +600,64 @@ async function generateTourPackageDetail(
 
   const costSaver = isCostSaverMode(adminContext);
 
-  curated = await Promise.all(
+  const enriched = await Promise.all(
     curated.map(async (spot, index) => {
       const wiki = await fetchWikipediaSummary(spot.name, "en");
-      const description = wiki || spot.description;
-      const whyChosen = costSaver
-        ? buildTemplateWhyChosen(spot, summary.title)
-        : await generateWhyChosen(spot, summary.title, adminContext);
-      const summaryText = costSaver
-        ? buildTemplateSummary(spot.name, description, summary.title, summary.region)
-        : await generateAttractionSummary(
-            spot.name,
-            description,
-            summary.title,
-            summary.region,
-            adminContext
-          );
-      const previewSnippet = costSaver
-        ? buildTemplateAudioPreview(spot.name, summaryText, summary.title, summary.region)
-        : await generateAudioPreview(
-            spot.name,
-            summaryText,
-            summary.title,
-            summary.region,
-            adminContext
-          );
       return {
         ...spot,
         orderIndex: index,
-        description: summaryText,
-        summary: summaryText,
-        whyChosen,
-        previewSnippet,
+        groundedDescription: wiki || spot.description,
       };
     })
   );
+
+  const discoveryBySpotId = costSaver
+    ? new Map(
+        enriched.map((spot) => [
+          spot.id,
+          {
+            whyChosen: buildTemplateWhyChosen(spot, summary.title),
+            summary: buildTemplateSummary(
+              spot.name,
+              spot.groundedDescription,
+              summary.title,
+              summary.region
+            ),
+            previewSnippet: buildTemplateAudioPreview(
+              spot.name,
+              spot.groundedDescription,
+              summary.title,
+              summary.region
+            ),
+          },
+        ])
+      )
+    : await generatePackageSpotDiscoveryBatch(enriched, summary, adminContext);
+
+  curated = enriched.map((spot) => {
+    const copy = discoveryBySpotId.get(spot.id) ?? {
+      whyChosen: buildTemplateWhyChosen(spot, summary.title),
+      summary: buildTemplateSummary(
+        spot.name,
+        spot.groundedDescription,
+        summary.title,
+        summary.region
+      ),
+      previewSnippet: buildTemplateAudioPreview(
+        spot.name,
+        spot.groundedDescription,
+        summary.title,
+        summary.region
+      ),
+    };
+    return {
+      ...spot,
+      description: copy.summary,
+      summary: copy.summary,
+      whyChosen: copy.whyChosen,
+      previewSnippet: copy.previewSnippet,
+    };
+  });
 
   const extras = await generatePackageExtras(summary, countryName, curated, adminContext);
   const centroid = computeRouteCentroid(curated);
@@ -669,38 +690,87 @@ async function generateTourPackageDetail(
   };
 }
 
-async function generateWhyChosen(
-  spot: AttractionDoc,
-  packageTitle: string,
+async function generatePackageSpotDiscoveryBatch(
+  spots: Array<AttractionDoc & { groundedDescription: string }>,
+  packageSummary: PackageSummaryDoc,
   context?: CurationContext
-): Promise<string> {
+): Promise<
+  Map<string, { whyChosen: string; summary: string; previewSnippet: string }>
+> {
+  const fallback = new Map(
+    spots.map((spot) => [
+      spot.id,
+      {
+        whyChosen: buildTemplateWhyChosen(spot, packageSummary.title),
+        summary: buildTemplateSummary(
+          spot.name,
+          spot.groundedDescription,
+          packageSummary.title,
+          packageSummary.region
+        ),
+        previewSnippet: buildTemplateAudioPreview(
+          spot.name,
+          spot.groundedDescription,
+          packageSummary.title,
+          packageSummary.region
+        ),
+      },
+    ])
+  );
+
   if (!hasGeminiApiKey()) {
-    return `Essential stop on the ${packageTitle} route — ${spot.name} ranks among the region's top-rated attractions.`;
+    return fallback;
   }
 
   try {
-    const prompt = buildWhyChosenPrompt(
-      spot.name,
-      packageTitle,
-      spot.rating,
-      spot.userRatingsTotal
+    const prompt = buildPackageSpotDiscoveryPrompt(
+      packageSummary.title,
+      packageSummary.region,
+      spots.map((s) => ({
+        id: s.id,
+        name: s.name,
+        description: s.groundedDescription,
+      }))
     );
-    const adminOpts = resolveCurationOptions(context?.quality ?? "user");
+    const adminOpts = resolveCurationOptions(
+      context?.quality ?? "user",
+      "generate_package_spot_discovery"
+    );
     const responseText = await generateGeminiText(
-      "generate_why_chosen",
+      "generate_package_spot_discovery",
       prompt,
-      { spotName: spot.name, packageTitle },
+      { packageId: packageSummary.id, spotCount: spots.length },
       { tier: adminOpts.tier, model: adminOpts.model }
     );
-    return responseText.trim();
+    const parsed = JSON.parse(extractJsonArray(responseText)) as {
+      spots?: Array<{
+        id?: string;
+        whyChosen?: string;
+        summary?: string;
+        previewSnippet?: string;
+      }>;
+    };
+
+    for (const row of parsed.spots ?? []) {
+      const id = String(row.id ?? "").trim();
+      if (!id || !fallback.has(id)) continue;
+      fallback.set(id, {
+        whyChosen: String(row.whyChosen ?? fallback.get(id)!.whyChosen).trim(),
+        summary: excerptWords(String(row.summary ?? fallback.get(id)!.summary).trim(), 80),
+        previewSnippet: excerptWords(
+          String(row.previewSnippet ?? fallback.get(id)!.previewSnippet).trim(),
+          120
+        ),
+      });
+    }
   } catch (error) {
-    getGuideMeLogger().logFallback("generate_why_chosen", "generation_failed", {
-      spotName: spot.name,
-      packageTitle,
+    getGuideMeLogger().logFallback("generate_package_spot_discovery", "generation_failed", {
+      packageId: packageSummary.id,
       error: error instanceof Error ? error.message : "unknown",
     });
-    return `Top-reviewed highlight on the ${packageTitle} itinerary.`;
   }
+
+  return fallback;
 }
 
 function buildTemplateWhyChosen(spot: AttractionDoc, packageTitle: string): string {
@@ -742,70 +812,6 @@ function excerptWords(text: string, maxWords: number): string {
     return text.trim();
   }
   return `${words.slice(0, maxWords).join(" ")}…`;
-}
-
-async function generateAttractionSummary(
-  spotName: string,
-  description: string,
-  packageTitle: string,
-  region: string,
-  context?: CurationContext
-): Promise<string> {
-  const grounded = description.trim();
-  if (!hasGeminiApiKey()) {
-    return buildTemplateSummary(spotName, grounded, packageTitle, region);
-  }
-
-  try {
-    const prompt = buildAttractionSummaryPrompt(spotName, grounded, packageTitle, region);
-    const adminOpts = resolveCurationOptions(context?.quality ?? "user");
-    const responseText = await generateGeminiText(
-      "generate_attraction_summary",
-      prompt,
-      { spotName, packageTitle },
-      { tier: adminOpts.tier, model: adminOpts.model }
-    );
-    return excerptWords(responseText.trim(), 80);
-  } catch (error) {
-    getGuideMeLogger().logFallback("generate_attraction_summary", "generation_failed", {
-      spotName,
-      packageTitle,
-      error: error instanceof Error ? error.message : "unknown",
-    });
-    return buildTemplateSummary(spotName, grounded, packageTitle, region);
-  }
-}
-
-async function generateAudioPreview(
-  spotName: string,
-  description: string,
-  packageTitle: string,
-  region: string,
-  context?: CurationContext
-): Promise<string> {
-  const grounded = description.trim();
-  if (!hasGeminiApiKey()) {
-    return buildTemplateAudioPreview(spotName, grounded, packageTitle, region);
-  }
-
-  try {
-    const prompt = buildAudioPreviewPrompt(spotName, grounded, packageTitle, region);
-    const adminOpts = resolveCurationOptions(context?.quality ?? "user");
-    const responseText = await generateGeminiText(
-      "generate_audio_preview",
-      prompt,
-      { spotName, packageTitle },
-      { tier: adminOpts.tier, model: adminOpts.model }
-    );
-    return excerptWords(responseText.trim(), 120);
-  } catch (error) {
-    getGuideMeLogger().logFallback("generate_audio_preview", "generation_failed", {
-      spotName,
-      packageTitle,
-      error: error instanceof Error ? error.message : "unknown",
-    });
-    return buildTemplateAudioPreview(spotName, grounded, packageTitle, region);
-  }
 }
 
 async function generatePackageExtras(
@@ -862,7 +868,7 @@ async function generatePackageExtras(
       spotNames,
       daySpotGroups
     );
-    const adminOpts = resolveCurationOptions(context?.quality ?? "user");
+    const adminOpts = resolveCurationOptions(context?.quality ?? "user", "generate_package_extras");
     const responseText = await generateGeminiText(
       "generate_package_extras",
       prompt,
@@ -905,8 +911,9 @@ async function fetchVerifiedHotels(
   context?: CurationContext
 ): Promise<NearbyPlaceDoc[]> {
   const places = await fetchPlacesNearbyByType(lat, lng, "lodging", 5);
-  const useGeminiDescriptions = hasGeminiApiKey() && !isCostSaverMode(context);
-  const adminOpts = resolveCurationOptions(context?.quality ?? "user");
+  const useGeminiDescriptions =
+    hasGeminiApiKey() && !isCostSaverMode(context) && context?.quality !== "admin";
+  const adminOpts = resolveCurationOptions(context?.quality ?? "user", "hotel_description");
 
   return Promise.all(
     places.map(async (place) => {
@@ -948,8 +955,9 @@ async function fetchVerifiedRestaurants(
   context?: CurationContext
 ): Promise<NearbyPlaceDoc[]> {
   const places = await fetchPlacesNearbyByType(lat, lng, "restaurant", 5);
-  const useGeminiDescriptions = hasGeminiApiKey() && !isCostSaverMode(context);
-  const adminOpts = resolveCurationOptions(context?.quality ?? "user");
+  const useGeminiDescriptions =
+    hasGeminiApiKey() && !isCostSaverMode(context) && context?.quality !== "admin";
+  const adminOpts = resolveCurationOptions(context?.quality ?? "user", "restaurant_description");
 
   return Promise.all(
     places.map(async (place) => {

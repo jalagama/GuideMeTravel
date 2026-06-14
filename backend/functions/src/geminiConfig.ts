@@ -51,15 +51,32 @@ export function shouldUseGeminiBatch(context?: CurationContext): boolean {
   return flag === "true" || flag === "1" || flag === "on";
 }
 
+/** Bulk copy ops use Flash-Lite in admin jobs to cut Gemini prepay ~40–60%. */
+const ADMIN_LITE_COPY_OPERATIONS = new Set([
+  "generate_genres",
+  "fetch_packages",
+  "fetch_packages_fill",
+  "generate_package_extras",
+  "generate_package_spot_discovery",
+  "generate_why_chosen",
+  "generate_attraction_summary",
+  "generate_audio_preview",
+]);
+
 export function resolveCurationOptions(
   quality: CurationQuality = "user",
   operation?: string
 ): ResolvedCurationOptions {
   if (quality === "admin") {
     const usePro = operation === "expert_spots";
+    const useLiteCopy = Boolean(operation && ADMIN_LITE_COPY_OPERATIONS.has(operation));
     return {
-      tier: "standard",
-      model: usePro ? GEMINI_ADMIN_EXPERT_MODEL : GEMINI_ADMIN_MODEL,
+      tier: useLiteCopy ? "lite" : "standard",
+      model: usePro
+        ? GEMINI_ADMIN_EXPERT_MODEL
+        : useLiteCopy
+          ? GEMINI_LITE_MODEL
+          : GEMINI_ADMIN_MODEL,
       costSaver: false,
       expertSpotMultiplier: 2,
       useBatch: operation !== "expert_spots" && shouldUseGeminiBatch({ quality: "admin" }),

@@ -157,6 +157,45 @@ Rank 1 = most iconic. Include every major landmark before secondary stops.
 Only real places inside ${countryName}. No commercial businesses. No fabrication.`;
 }
 
+export function buildPackageSpotDiscoveryPrompt(
+  packageTitle: string,
+  region: string,
+  spots: Array<{ id: string; name: string; description: string }>
+): string {
+  const spotList = spots
+    .map(
+      (s, i) =>
+        `${i + 1}. id="${s.id}" name="${s.name}"\n   Facts: ${s.description.slice(0, 400)}`
+    )
+    .join("\n");
+
+  return `${EDITORIAL_PERSONA}
+
+For the "${packageTitle}" trip in ${region}, write discovery copy for every listed attraction in ONE response.
+
+Return JSON only:
+{
+  "spots": [
+    {
+      "id": "matching-id-from-input",
+      "whyChosen": "One sentence (max 120 chars) why essential on this itinerary",
+      "summary": "50-80 word factual third-person summary for browsing",
+      "previewSnippet": "80-120 word second-person spoken teaser for Listen Before You Go"
+    }
+  ]
+}
+
+Attractions:
+${spotList}
+
+Rules:
+- One entry per input id; preserve ids exactly.
+- Use only facts provided; do not invent dates or claims.
+- summary: encyclopedic, names significance (UNESCO, dynasty, etc.).
+- previewSnippet: warm tour-guide teaser, not the full on-site narration.
+- Plain text in string values only.`;
+}
+
 export function buildWhyChosenPrompt(
   spotName: string,
   packageTitle: string,

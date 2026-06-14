@@ -66,8 +66,19 @@ export function estimateCountryCuration(input: {
   const guideAudioFiles =
     input.mode === "catalog_only" ? 0 : uniqueSpots * languages.length;
 
-  const geminiCatalog =
+  /** Legacy full catalog: per-spot why + summary + preview + transcript (many Flash calls). */
+  const geminiCatalogLegacy =
     input.mode === "languages_only" ? 0 : 35 + EST_GENRE_COUNT * 4 + packageCards * 0.22;
+  /**
+   * Discovery catalog: Flash-Lite for genres/packages/copy; one batched spot-discovery call
+   * + extras per package; Pro only for expert spot lists (~3 Gemini calls per trip).
+   */
+  const geminiCatalogDiscovery =
+    input.mode === "languages_only"
+      ? 0
+      : 20 + EST_GENRE_COUNT * 2 + packageCards * 0.06 + tourDetails * 0.055;
+  const geminiCatalog =
+    input.mode === "catalog_only" ? geminiCatalogDiscovery : geminiCatalogLegacy;
   const geminiGuides =
     input.mode === "catalog_only" ? 0 : uniqueSpots * languages.length * 0.015;
   const cloudTts =
@@ -107,7 +118,7 @@ export function estimateCountryCuration(input: {
     input.mode === "full"
       ? `Full ${countryCode}: ~${packageCards} trips, ~${guideAudioFiles} audio files (${langLabel}). Est. ₹${Math.round(totalUsd * USD_TO_INR).toLocaleString()} and ${totalHoursMin}–${totalHoursMax} hours automated runtime.`
       : input.mode === "catalog_only"
-        ? `Catalog ${countryCode}: ~${packageCards} trips, no audio. Est. ₹${Math.round(totalUsd * USD_TO_INR).toLocaleString()} and ${catalogHoursMin}–${catalogHoursMax} hours.`
+        ? `Discovery ${countryCode}: ~${packageCards} trips (batched copy, Flash-Lite). Est. Gemini prepay ₹${Math.round(geminiPrepayUsd * USD_TO_INR).toLocaleString()} (was ~₹${Math.round((geminiCatalogLegacy + geminiGuides) * USD_TO_INR).toLocaleString()} full). TTS deferred to download.`
         : `Guides ${countryCode}: ~${guideAudioFiles} audio files (${langLabel}). Est. ₹${Math.round(totalUsd * USD_TO_INR).toLocaleString()} and ${totalHoursMin}–${totalHoursMax} hours.`;
 
   return {

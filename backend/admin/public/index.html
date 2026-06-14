@@ -302,7 +302,7 @@
         <dt>Genres</dt><dd>~${d.genres}</dd>
         <dt>Guide audio files</dt><dd>${d.guideAudioFiles > 0 ? `~${d.guideAudioFiles.toLocaleString()} (bulk mode only)` : '0 — generated on download'}</dd>
         <dt>Est. cost (total)</dt><dd>₹${est.costInr.total.toLocaleString()} (~$${est.costUsd.total})</dd>
-        <dt>Gemini prepay</dt><dd>₹${est.costInr.geminiPrepay.toLocaleString()}</dd>
+        <dt>Gemini prepay</dt><dd>₹${est.costInr.geminiPrepay.toLocaleString()} <span style="font-weight:400;font-size:0.8rem">(TTS/Maps billed separately on GCP)</span></dd>
         <dt>GCP billing (TTS/Maps)</dt><dd>₹${est.costInr.gcpBilling.toLocaleString()}</dd>
         <dt>Est. runtime</dt><dd>${est.duration.totalHoursMin}–${est.duration.totalHoursMax} hours (automated)</dd>
         <dt>Firestore</dt><dd style="font-weight:400;font-size:0.8rem">${d.firestoreCollections.join(', ')}</dd>

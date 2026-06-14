@@ -1,6 +1,21 @@
 # GuideMe Travel — AI Cost Analysis (Discovery vs Full Upfront)
 
-This document estimates Gemini and GCP costs per country under the **legacy full upfront** model vs the **discovery-first + lazy guide** model implemented in this migration.
+## Why Gemini prepay may show only ₹18k → ₹15k
+
+The admin **Gemini prepay** line is **not total project cost**. It excludes Cloud TTS (~₹9,600/country) and Google Maps (~₹2,900), which were the largest savings from deferring offline audio.
+
+| Line (India scale, 360 trips) | Full mode | Discovery (first migration) | Discovery (batched + Flash-Lite) |
+|-------------------------------|-----------|----------------------------|----------------------------------|
+| **Gemini prepay** | ~₹18,800 | ~₹15,600 | **~₹9,500** |
+| Cloud TTS (upfront) | ~₹9,600 | ₹0 | ₹0 |
+| Maps / GCP | ~₹2,900 | ~₹2,900 | ~₹2,900 |
+| **Total upfront** | ~₹31,300 | ~₹18,500 | **~₹12,400** |
+
+The first migration only removed the **guides phase** (~₹3,200 Gemini) but **added two Gemini calls per spot** (summary + preview) instead of one (full transcript), so Gemini prepay barely moved. **Batching + Flash-Lite** (current code) fixes that.
+
+---
+
+This document estimates Gemini and GCP costs per country under the **legacy full upfront** model vs the **discovery-first + lazy guide** model.
 
 ## Assumptions
 
